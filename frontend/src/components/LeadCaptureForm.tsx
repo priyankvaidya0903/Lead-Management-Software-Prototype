@@ -4,9 +4,9 @@ import { useState } from "react";
 import { Building2, User, Mail, Phone, Calendar, ArrowRight, Loader2, CheckCircle2 } from "lucide-react";
 
 const CLINICS = [
-  { id: "clinic_1", name: "Downtown Medical Center", location: "New York, NY" },
-  { id: "clinic_2", name: "Westside Health Clinic", location: "Los Angeles, CA" },
-  { id: "clinic_3", name: "Sunrise Family Care", location: "Miami, FL" },
+  { id: "455b4027-5a91-4aa6-89b3-d9ebb8357169", name: "Downtown Medical Center", location: "New York, NY" },
+  { id: "0662fa5e-dfc1-4eaa-874a-79b898253646", name: "Westside Health Clinic", location: "Los Angeles, CA" },
+  { id: "fdf96b85-bb72-4e54-8877-ab53ae7c8ded", name: "Sunrise Family Care", location: "Miami, FL" },
 ];
 
 export default function LeadCaptureForm() {
@@ -15,7 +15,6 @@ export default function LeadCaptureForm() {
     name: "",
     email: "",
     phone: "",
-    followup: false,
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -151,26 +150,6 @@ export default function LeadCaptureForm() {
                 onChange={handleChange}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all"
               />
-            </div>
-          </div>
-
-          <div className="pt-2 flex items-center gap-3">
-            <div className="relative flex items-start">
-              <div className="flex h-6 items-center">
-                <input
-                  id="followup"
-                  name="followup"
-                  type="checkbox"
-                  checked={formData.followup}
-                  onChange={handleChange}
-                  className="h-5 w-5 rounded border-white/20 bg-black/40 text-blue-500 focus:ring-blue-500/50 focus:ring-offset-zinc-900 transition-all cursor-pointer accent-blue-500"
-                />
-              </div>
-              <div className="ml-3 text-sm leading-6">
-                <label htmlFor="followup" className="font-medium text-zinc-300 cursor-pointer flex items-center gap-2">
-                  <Calendar size={16} /> Request a callback to confirm booking
-                </label>
-              </div>
             </div>
           </div>
 

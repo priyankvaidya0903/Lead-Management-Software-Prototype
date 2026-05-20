@@ -3,10 +3,10 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { clinicId, name, email, phone, followup } = body;
+    const { clinicId, name, email, phone } = body;
 
     // Validate the incoming data
-    if (!clinicId || !name || !email || !phone) {
+    if (!name || !email || !phone) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
 
     // Example payload assuming you created a custom 'leads' object in Twenty CRM
     // If you used the 'Email' and 'Phone' field types in Twenty CRM, they expect objects.
-    const crmPayload = {
+    const crmPayload: any = {
       name: name,
       email: {
         primaryEmail: email
@@ -40,13 +40,11 @@ export async function POST(req: Request) {
         primaryPhoneCountryCode: "US",
         primaryPhoneCallingCode: "+1"
       }
-      // Note: We've temporarily commented these out to ensure the baseline lead is created successfully.
-      // Make sure the API names for these fields match exactly before re-enabling them!
-      // clinicId: clinicId,
-      // requiresFollowup: followup
+      // Twenty CRM is rejecting clinicId because the API identifier doesn't perfectly match what is set in the CRM
+      // clinicId: clinicId
     };
 
-    const response = await fetch(`${TWENTY_API_URL}/leads`, {
+    const response = await fetch(`${TWENTY_API_URL}/leadss`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
