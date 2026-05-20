@@ -1,15 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { Building2, User, Mail, Phone, Calendar, ArrowRight, Loader2, CheckCircle2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Building2, User, Mail, Phone, ArrowRight, Loader2, CheckCircle2, UserCheck, CalendarDays, ExternalLink } from "lucide-react";
 
-const CLINICS = [
-  { id: "455b4027-5a91-4aa6-89b3-d9ebb8357169", name: "Downtown Medical Center", location: "New York, NY" },
-  { id: "0662fa5e-dfc1-4eaa-874a-79b898253646", name: "Westside Health Clinic", location: "Los Angeles, CA" },
-  { id: "fdf96b85-bb72-4e54-8877-ab53ae7c8ded", name: "Sunrise Family Care", location: "Miami, FL" },
-];
+const BOOKING_LINK = "https://calendar.app.google/ZNeBwHTpmscVzm3v7";
+
+interface Manager {
+  id: string;
+  name: string;
+}
+
+interface Clinic {
+  id: string;
+  name: string;
+  manager: Manager | null;
+}
 
 export default function LeadCaptureForm() {
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [clinicsLoading, setClinicsLoading] = useState(true);
+  const [clinicsError, setClinicsError] = useState("");
+
   const [formData, setFormData] = useState({
     clinicId: "",
     name: "",
@@ -19,6 +30,27 @@ export default function LeadCaptureForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState("");
+
+  // Auto-fetch clinics (with manager info) from the CRM on component mount
+  useEffect(() => {
+    async function fetchClinics() {
+      try {
+        const res = await fetch("/api/clinics");
+        if (!res.ok) throw new Error("Failed to load clinics");
+        const data = await res.json();
+        setClinics(data.clinics ?? []);
+      } catch (err) {
+        setClinicsError("Could not load clinics. Please refresh.");
+      } finally {
+        setClinicsLoading(false);
+      }
+    }
+    fetchClinics();
+  }, []);
+
+  // Derive the assigned manager from the selected clinic
+  const selectedClinic = clinics.find((c) => c.id === formData.clinicId) ?? null;
+  const assignedManager = selectedClinic?.manager ?? null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -52,17 +84,38 @@ export default function LeadCaptureForm() {
 
   if (isSuccess) {
     return (
-      <div className="w-full max-w-xl mx-auto p-8 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in zoom-in duration-500">
-        <div className="w-20 h-20 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mb-4">
+      <div className="w-full max-w-xl mx-auto p-8 rounded-3xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl flex flex-col items-center justify-center text-center space-y-5 animate-in fade-in zoom-in duration-500">
+        <div className="w-20 h-20 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center">
           <CheckCircle2 size={40} />
         </div>
+
         <h3 className="text-3xl font-bold text-white tracking-tight">Request Received!</h3>
-        <p className="text-zinc-300 text-lg">
-          Thank you for choosing us. Our relationship manager will contact you shortly to confirm your booking and answer any questions.
+        <p className="text-zinc-300 text-base leading-relaxed">
+          Thank you for choosing us.{" "}
+          {assignedManager
+            ? <><span className="font-semibold text-white">{assignedManager.name}</span> is your relationship manager and will be in touch soon.</>          
+            : "Our relationship manager will be in touch soon."}
         </p>
+
+        {/* Booking CTA */}
+        <div className="w-full pt-2">
+          <p className="text-zinc-400 text-sm mb-3">Want to lock in a time right now?</p>
+          <a
+            href={BOOKING_LINK}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-6 py-4 rounded-xl font-bold text-lg transition-all shadow-[0_0_30px_rgba(59,130,246,0.4)] hover:shadow-[0_0_50px_rgba(59,130,246,0.6)]"
+          >
+            <CalendarDays size={22} />
+            Book a 30-min Slot
+            <ExternalLink size={16} className="opacity-60 group-hover:opacity-100 transition-opacity" />
+          </a>
+          <p className="text-zinc-500 text-xs mt-2">Opens Google Calendar — pick any available time</p>
+        </div>
+
         <button
           onClick={() => setIsSuccess(false)}
-          className="mt-8 px-8 py-3 rounded-full bg-white/10 hover:bg-white/20 text-white font-medium transition-all"
+          className="px-8 py-2.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white text-sm font-medium transition-all border border-white/10"
         >
           Submit Another Request
         </button>
@@ -91,20 +144,45 @@ export default function LeadCaptureForm() {
             <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
               <Building2 size={16} /> Select Clinic
             </label>
-            <select
-              name="clinicId"
-              required
-              value={formData.clinicId}
-              onChange={handleChange}
-              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all appearance-none"
-            >
-              <option value="" disabled className="bg-zinc-900">Choose a location...</option>
-              {CLINICS.map((clinic) => (
-                <option key={clinic.id} value={clinic.id} className="bg-zinc-900">
-                  {clinic.name} - {clinic.location}
-                </option>
-              ))}
-            </select>
+            {clinicsError ? (
+              <p className="text-red-400 text-sm">{clinicsError}</p>
+            ) : (
+              <>
+                <select
+                  name="clinicId"
+                  required
+                  value={formData.clinicId}
+                  onChange={handleChange}
+                  disabled={clinicsLoading}
+                  className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all appearance-none disabled:opacity-60"
+                >
+                  <option value="" disabled className="bg-zinc-900">
+                    {clinicsLoading ? "Loading clinics..." : "Choose a location..."}
+                  </option>
+                  {clinics.map((clinic) => (
+                    <option key={clinic.id} value={clinic.id} className="bg-zinc-900">
+                      {clinic.name}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Auto-assigned manager badge */}
+                {assignedManager && (
+                  <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm animate-in fade-in slide-in-from-top-1 duration-300">
+                    <UserCheck size={14} className="shrink-0" />
+                    <span>
+                      Your relationship manager: <span className="font-semibold text-blue-200">{assignedManager.name}</span>
+                    </span>
+                  </div>
+                )}
+                {formData.clinicId && !assignedManager && !clinicsLoading && (
+                  <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-zinc-500/10 border border-zinc-500/20 text-zinc-400 text-sm animate-in fade-in duration-300">
+                    <UserCheck size={14} className="shrink-0" />
+                    <span>No manager assigned to this clinic yet.</span>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <div className="space-y-1.5">
