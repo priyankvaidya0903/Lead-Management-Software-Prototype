@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Building2, User, Mail, Phone, ArrowRight, Loader2, CheckCircle2, UserCheck, CalendarDays, ExternalLink } from "lucide-react";
-
-const BOOKING_LINK = "https://calendar.app.google/ZNeBwHTpmscVzm3v7";
+import { Building2, User, Mail, Phone, ArrowRight, Loader2, CheckCircle2 } from "lucide-react";
 
 interface Manager {
   id: string;
@@ -48,9 +46,8 @@ export default function LeadCaptureForm() {
     fetchClinics();
   }, []);
 
-  // Derive the assigned manager from the selected clinic
+  // Derive the selected clinic if needed
   const selectedClinic = clinics.find((c) => c.id === formData.clinicId) ?? null;
-  const assignedManager = selectedClinic?.manager ?? null;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value, type } = e.target;
@@ -91,27 +88,8 @@ export default function LeadCaptureForm() {
 
         <h3 className="text-3xl font-bold text-white tracking-tight">Request Received!</h3>
         <p className="text-zinc-300 text-base leading-relaxed">
-          Thank you for choosing us.{" "}
-          {assignedManager
-            ? <><span className="font-semibold text-white">{assignedManager.name}</span> is your relationship manager and will be in touch soon.</>          
-            : "Our relationship manager will be in touch soon."}
+          Thank you for choosing us. Our team will be in touch soon.
         </p>
-
-        {/* Booking CTA */}
-        <div className="w-full pt-2">
-          <p className="text-zinc-400 text-sm mb-3">Want to lock in a time right now?</p>
-          <a
-            href={BOOKING_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group w-full flex items-center justify-center gap-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white px-6 py-4 rounded-xl font-bold text-lg transition-all shadow-[0_0_30px_rgba(59,130,246,0.4)] hover:shadow-[0_0_50px_rgba(59,130,246,0.6)]"
-          >
-            <CalendarDays size={22} />
-            Book a 30-min Slot
-            <ExternalLink size={16} className="opacity-60 group-hover:opacity-100 transition-opacity" />
-          </a>
-          <p className="text-zinc-500 text-xs mt-2">Opens Google Calendar — pick any available time</p>
-        </div>
 
         <button
           onClick={() => setIsSuccess(false)}
@@ -165,22 +143,6 @@ export default function LeadCaptureForm() {
                     </option>
                   ))}
                 </select>
-
-                {/* Auto-assigned manager badge */}
-                {assignedManager && (
-                  <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-300 text-sm animate-in fade-in slide-in-from-top-1 duration-300">
-                    <UserCheck size={14} className="shrink-0" />
-                    <span>
-                      Your relationship manager: <span className="font-semibold text-blue-200">{assignedManager.name}</span>
-                    </span>
-                  </div>
-                )}
-                {formData.clinicId && !assignedManager && !clinicsLoading && (
-                  <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-zinc-500/10 border border-zinc-500/20 text-zinc-400 text-sm animate-in fade-in duration-300">
-                    <UserCheck size={14} className="shrink-0" />
-                    <span>No manager assigned to this clinic yet.</span>
-                  </div>
-                )}
               </>
             )}
           </div>
