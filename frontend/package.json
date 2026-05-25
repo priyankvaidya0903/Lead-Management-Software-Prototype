@@ -9,9 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
-
-    "ioredis": "^5.10.1",
     "googleapis": "^171.4.0",
+    "ioredis": "^5.10.1",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
     "react": "19.2.4",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Building2, User, Mail, Phone, ArrowRight, Loader2, CheckCircle2 } from "lucide-react";
+import { Building2, User, Mail, Phone, ArrowRight, Loader2, CheckCircle2, Stethoscope } from "lucide-react";
 
 interface Manager {
   id: string;
@@ -24,6 +24,8 @@ export default function LeadCaptureForm() {
     name: "",
     email: "",
     phone: "",
+    treatment: "",
+    source: "Organic",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -31,6 +33,15 @@ export default function LeadCaptureForm() {
 
   // Auto-fetch clinics (with manager info) from the CRM on component mount
   useEffect(() => {
+    // Capture UTM tracking from URL
+    if (typeof window !== "undefined") {
+      const searchParams = new URLSearchParams(window.location.search);
+      const utmSource = searchParams.get("utm_source") || searchParams.get("source") || searchParams.get("ref");
+      if (utmSource) {
+        setFormData((prev) => ({ ...prev, source: utmSource }));
+      }
+    }
+
     async function fetchClinics() {
       try {
         const res = await fetch("/api/clinics");
@@ -191,6 +202,26 @@ export default function LeadCaptureForm() {
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all"
               />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-zinc-300 flex items-center gap-2">
+              <Stethoscope size={16} /> Interested Treatment
+            </label>
+            <select
+              name="treatment"
+              required
+              value={formData.treatment}
+              onChange={handleChange}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition-all appearance-none"
+            >
+              <option value="" disabled className="bg-zinc-900">
+                Select a treatment...
+              </option>
+              <option value="General Consultation" className="bg-zinc-900">General Consultation</option>
+              <option value="Specialized Treatment" className="bg-zinc-900">Specialized Treatment</option>
+              <option value="Follow-up" className="bg-zinc-900">Follow-up</option>
+            </select>
           </div>
 
           <div className="pt-6">
