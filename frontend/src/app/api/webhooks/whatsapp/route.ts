@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import Redis from "ioredis";
+import { findLeadByPhone, createLeadNote, createEscalationTask, updateLeadStage } from "@/lib/twentyCrmClient";
 
 // Meta WhatsApp Cloud API credentials
 // (These need to be added to .env.local)
@@ -15,7 +16,7 @@ export async function POST(req: Request) {
     const headerPhone = req.headers.get("phone");
     const headerStage = req.headers.get("status") || req.headers.get("stage");
 
-    // 1. Parse the incoming webhook payload from Twenty CRM
+    // 1. Parse the incoming webhook payload
     let payload: any = {};
     try {
       payload = await req.json();
@@ -23,26 +24,77 @@ export async function POST(req: Request) {
       console.log("[WhatsApp Webhook] Empty or invalid JSON body. Relying on headers.");
     }
 
+    // ─── INCOMING MESSAGE HANDLING (From Meta) ──────────────────────────────────
+    if (payload?.object === "whatsapp_business_account") {
+      const entry = payload.entry?.[0];
+      const changes = entry?.changes?.[0];
+      const value = changes?.value;
+      
+      // If it's an incoming message
+      if (value?.messages && value.messages.length > 0) {
+        const message = value.messages[0];
+        // Meta sends phone numbers with country code but no '+'
+        const fromNumber = message.from; 
+        const messageText = message.text?.body || "";
+        
+        console.log(`[WhatsApp Webhook] Received incoming message from ${fromNumber}: "${messageText}"`);
+        
+        // Find Lead in Twenty CRM
+        const lead = await findLeadByPhone(fromNumber);
+        if (lead) {
+          console.log(`[WhatsApp Webhook] Found matching lead ${lead.id}. Logging note...`);
+          await createLeadNote(lead.id, `User said: ${messageText}`);
+          
+          // Update the Lead Stage
+          console.log(`[WhatsApp Webhook] Updating stage for lead ${lead.id}...`);
+          await updateLeadStage(lead.id, "WHATSAPP_MESSAGE_INCOMED");
+
+          // Escalation Check
+          const textLower = messageText.toLowerCase();
+          const escalationKeywords = ["human", "manager", "talk to", "escalate", "call me"];
+          if (escalationKeywords.some(keyword => textLower.includes(keyword))) {
+            console.log(`[WhatsApp Webhook] Escalation keyword detected! Creating Task for lead ${lead.id}...`);
+            await createEscalationTask(lead.id, lead.managerId || "", messageText);
+          }
+        } else {
+          console.log(`[WhatsApp Webhook] No matching lead found for phone number ${fromNumber}.`);
+        }
+        
+        return NextResponse.json({ success: true, message: "Incoming message processed" });
+      }
+
+      // If it's a status update (delivered, read, failed)
+      if (value?.statuses) {
+        console.log("[WhatsApp Webhook] Received status update from Meta:", value.statuses[0].status);
+        return NextResponse.json({ success: true, message: "Status update processed" });
+      }
+
+      // If it's something else (like a template status update or other Meta event)
+      console.log("[WhatsApp Webhook] Unhandled Meta webhook event:", JSON.stringify(value, null, 2));
+      return NextResponse.json({ success: true, message: "Webhook received but not actionable" });
+    }
+    // ────────────────────────────────────────────────────────────────────────────
+
     console.log("[WhatsApp Webhook] Received payload:", payload, "Headers (phone/status):", headerPhone, headerStage);
 
     // Twenty CRM webhook payloads usually have the record data inside `payload.data`
     const leadData = payload?.data ?? payload;
-    
+
     const stage = headerStage || leadData?.stage;
     const rawName = leadData?.name ?? "there";
     const leadId = leadData?.id || req.headers.get("id");
-    
+
     // Extract the primary phone number
     let phoneNumber = headerPhone || "";
 
     if (!phoneNumber) {
       const phoneObj = leadData?.phone;
       if (typeof phoneObj === 'object' && phoneObj?.primaryPhoneNumber) {
-         const callingCode = phoneObj.primaryPhoneCallingCode || "";
-         const number = phoneObj.primaryPhoneNumber;
-         phoneNumber = `${callingCode}${number}`;
+        const callingCode = phoneObj.primaryPhoneCallingCode || "";
+        const number = phoneObj.primaryPhoneNumber;
+        phoneNumber = `${callingCode}${number}`;
       } else if (typeof phoneObj === 'string') {
-         phoneNumber = phoneObj;
+        phoneNumber = phoneObj;
       }
     }
 
@@ -53,7 +105,12 @@ export async function POST(req: Request) {
     }
 
     // Strip leading '+' or spaces from phone number as Meta requires format without '+'
-    const cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+    let cleanPhoneNumber = phoneNumber.replace(/[^0-9]/g, '');
+    
+    // If the number is exactly 10 digits, assume it's an Indian local number and prepend 91
+    if (cleanPhoneNumber.length === 10) {
+      cleanPhoneNumber = `91${cleanPhoneNumber}`;
+    }
 
     if (stage !== "NOT_PICKING_UP") {
       console.log(`[WhatsApp Webhook] Stage is ${stage}, not 'NOT_PICKING_UP'. Skipping.`);
@@ -79,9 +136,9 @@ export async function POST(req: Request) {
     // 3. Send the WhatsApp message via Meta Graph API
     // Using a standard template message
     const templateName = process.env.META_WHATSAPP_TEMPLATE_NAME || "hello_world"; // fallback or from env
-    
+
     const graphApiUrl = `https://graph.facebook.com/v18.0/${metaPhoneNumberId}/messages`;
-    
+
     const requestBody = {
       messaging_product: "whatsapp",
       to: cleanPhoneNumber,
@@ -90,19 +147,7 @@ export async function POST(req: Request) {
         name: templateName,
         language: {
           code: "en_US"
-        },
-        // Components can be mapped dynamically if the template takes parameters
-        components: [
-          {
-            type: "body",
-            parameters: [
-              {
-                type: "text",
-                text: rawName
-              }
-            ]
-          }
-        ]
+        }
       }
     };
 
@@ -121,11 +166,11 @@ export async function POST(req: Request) {
       console.error("[WhatsApp Webhook] Meta API error:", responseData);
       // Remove the idempotency lock since we failed to send the message
       if (leadId && redis) {
-         await redis.del(`whatsapp_sent:${leadId}:${stage}`);
+        await redis.del(`whatsapp_sent:${leadId}:${stage}`);
       }
       return NextResponse.json({ error: "Failed to send WhatsApp message via Meta", details: responseData }, { status: 500 });
     }
-    
+
     console.log(`[WhatsApp Webhook] Successfully sent Meta WhatsApp message. ID: ${responseData?.messages?.[0]?.id}`);
     return NextResponse.json({ success: true, messageId: responseData?.messages?.[0]?.id });
 

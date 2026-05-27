@@ -14,7 +14,7 @@ export async function POST(req: Request) {
         source = "GOOGLE_ADS";
       } else if (lowerSource.includes("facebook") || lowerSource.includes("fb") || lowerSource.includes("meta")) {
         source = "FACEBOOK_ADS";
-      } 
+      }
       // If it doesn't match, we will just pass the raw source (e.g. "Organic") 
       // directly to the CRM so it shows up in the payload.
     }

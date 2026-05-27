@@ -111,3 +111,236 @@ export function clearManagerCache(clinicId?: string): void {
   }
   console.log(`[TwentyCRM] Cache cleared${clinicId ? ` for clinic ${clinicId}` : ""}`);
 }
+
+export async function findLeadByPhone(phoneNumber: string): Promise<{ id: string, managerId?: string } | null> {
+  const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
+  const apiKey = process.env.TWENTY_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const fetchLead = async (phone: string) => {
+      const filterParam = encodeURIComponent(`phone.primaryPhoneNumber[eq]:${phone}`);
+      const url = `${apiUrl}/leadss?filter=${filterParam}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+      });
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data?.data?.leadss ?? data?.leadss ?? data?.data ?? [];
+    };
+
+    // 1. FAST PATH: Try exact match without + prefix (since user stores 91... in CRM directly)
+    let leads = await fetchLead(phoneNumber);
+    if (leads && leads.length > 0) return { id: leads[0].id, managerId: leads[0].managerId };
+
+    // 2. Try exact match with + prefix
+    leads = await fetchLead(`+${phoneNumber}`);
+    if (leads && leads.length > 0) return { id: leads[0].id, managerId: leads[0].managerId };
+    
+    // 3. Try stripping India country code (91)
+    if (phoneNumber.startsWith('91')) {
+      leads = await fetchLead(phoneNumber.substring(2));
+      if (leads && leads.length > 0) return { id: leads[0].id, managerId: leads[0].managerId };
+    }
+    
+    // 4. Try stripping US country code (1)
+    if (phoneNumber.startsWith('1')) {
+      leads = await fetchLead(phoneNumber.substring(1));
+      if (leads && leads.length > 0) return { id: leads[0].id, managerId: leads[0].managerId };
+    }
+
+    return null;
+  } catch (e) {
+    console.error("[TwentyCRM] Error finding lead by phone:", e);
+    return null;
+  }
+}
+
+export async function createLeadNote(leadId: string, text: string): Promise<boolean> {
+  const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
+  const apiKey = process.env.TWENTY_API_KEY;
+  if (!apiKey) return false;
+
+  try {
+    // 1. Fetch note targets for this lead to find an existing transcript
+    let transcriptNote: any = null;
+    const targetRes = await fetch(`${apiUrl}/noteTargets?filter=targetLeadsId[eq]:${leadId}&limit=10`, {
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+    });
+    
+    if (targetRes.ok) {
+      const targetData = await targetRes.json();
+      const targets = targetData?.data?.noteTargets ?? targetData?.noteTargets ?? targetData?.data ?? [];
+      
+      const notePromises = targets.map((target: any) => {
+        if (target.noteId) {
+          return fetch(`${apiUrl}/notes/${target.noteId}`, {
+            headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+          }).then(r => r.ok ? r.json() : null);
+        }
+        return Promise.resolve(null);
+      });
+
+      const noteResults = await Promise.all(notePromises);
+      
+      for (const noteData of noteResults) {
+        if (!noteData) continue;
+        const note = noteData?.data?.note ?? noteData?.note ?? noteData?.data ?? noteData;
+        if (note && note.title === "📱 WhatsApp Chat Transcript") {
+          transcriptNote = note;
+          break;
+        }
+      }
+    }
+
+    const timestamp = new Date().toLocaleString();
+    const formattedMessage = `[${timestamp}] 🟢 IN: ${text}`;
+
+    if (transcriptNote) {
+      // Append to existing thread
+      let blocks = [];
+      try {
+        if (typeof transcriptNote.bodyV2?.blocknote === 'string') {
+          blocks = JSON.parse(transcriptNote.bodyV2.blocknote);
+        } else if (Array.isArray(transcriptNote.bodyV2?.blocknote)) {
+          blocks = transcriptNote.bodyV2.blocknote;
+        }
+      } catch (e) {
+        console.warn("[TwentyCRM] Could not parse existing blocknote, starting fresh array.");
+      }
+      
+      blocks.push({ type: "paragraph", content: formattedMessage });
+
+      await fetch(`${apiUrl}/notes/${transcriptNote.id}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bodyV2: {
+            blocknote: JSON.stringify(blocks)
+          }
+        })
+      });
+      return true;
+    } else {
+      // Create new thread
+      const response = await fetch(`${apiUrl}/notes`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "📱 WhatsApp Chat Transcript",
+          bodyV2: {
+            blocknote: JSON.stringify([{ type: "paragraph", content: formattedMessage }])
+          }
+        })
+      });
+      const noteData = await response.json();
+      if (!response.ok) {
+          console.error("[TwentyCRM] Note creation failed:", noteData);
+          return false;
+      }
+      
+      // Create NoteTarget relationship via GraphQL
+      const noteId = noteData?.data?.createNote?.id ?? noteData?.data?.notes?.id ?? noteData?.data?.id ?? noteData?.id;
+      if (noteId) {
+        const graphqlUrl = apiUrl.replace('/rest', '/graphql');
+        await fetch(graphqlUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query: `
+              mutation {
+                createNoteTarget(data: {
+                  noteId: "${noteId}",
+                  targetLeadsId: "${leadId}"
+                }) {
+                  id
+                }
+              }
+            `
+          })
+        });
+      }
+      return true;
+    }
+  } catch (e) {
+    console.error("[TwentyCRM] Error handling chat transcript:", e);
+    return false;
+  }
+}
+
+export async function createEscalationTask(leadId: string, managerId: string, message: string): Promise<boolean> {
+  const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
+  const apiKey = process.env.TWENTY_API_KEY;
+  if (!apiKey) return false;
+
+  try {
+    const response = await fetch(`${apiUrl}/tasks`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: "🔥 WhatsApp Escalation Request",
+        bodyV2: {
+          blocknote: JSON.stringify([{ type: "paragraph", content: `Lead requested manager assistance.\n\nMessage: "${message}"` }])
+        },
+        assigneeId: managerId || null
+      })
+    });
+    const taskData = await response.json();
+    if (!response.ok) {
+        console.error("[TwentyCRM] Task creation failed:", taskData);
+        return false;
+    }
+    
+    // Create TaskTarget relationship via GraphQL
+    const taskId = taskData?.data?.createTask?.id ?? taskData?.data?.tasks?.id ?? taskData?.data?.id ?? taskData?.id;
+    if (taskId) {
+      const graphqlUrl = apiUrl.replace('/rest', '/graphql');
+      await fetch(graphqlUrl, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: `
+            mutation {
+              createTaskTarget(data: {
+                taskId: "${taskId}",
+                targetLeadsId: "${leadId}"
+              }) {
+                id
+              }
+            }
+          `
+        })
+      });
+    }
+    return true;
+  } catch (e) {
+    console.error("[TwentyCRM] Error creating escalation task:", e);
+    return false;
+  }
+}
+
+export async function updateLeadStage(leadId: string, newStage: string): Promise<boolean> {
+  const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
+  const apiKey = process.env.TWENTY_API_KEY;
+  if (!apiKey) return false;
+
+  try {
+    const response = await fetch(`${apiUrl}/leadss/${leadId}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        stage: newStage
+      })
+    });
+    
+    if (!response.ok) {
+      console.error("[TwentyCRM] Failed to update lead stage:", await response.text());
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[TwentyCRM] Error updating lead stage:", e);
+    return false;
+  }
+}
