@@ -57,7 +57,7 @@ EOF
 # 5. Boot it up!
 cd "$DEPLOY_DIR"
 echo "⏳ Spinning up containers..."
-docker compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.prod.yml up -d
 
 echo "✅ Success!"
 echo "--------------------------------------------------------"
