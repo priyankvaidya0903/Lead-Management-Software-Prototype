@@ -31,9 +31,10 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cp "$SCRIPT_DIR/docker-compose.prod.yml" "$DEPLOY_DIR/"
 cp "$ROOT_DIR/twenty_template.sql" "$DEPLOY_DIR/"
 
-# 3. Generate a secure random encryption key for this clinic's CRM
-ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')
-APP_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+# 3. Use the MASTER encryption keys so the cloned database can be decrypted!
+# If you generate new keys, the cloned user accounts and workspaces will break.
+ENCRYPTION_KEY="S2N9z7kLq+JcT9rVb4hYm1WpXd6vQoZtH8j3fM0eCxU="
+APP_SECRET="S2N9z7kLq+JcT9rVb4hYm1WpXd6vQoZtH8j3fM0eCxU="
 
 # 4. Determine the SERVER_URL
 if [ -n "$CUSTOM_DOMAIN" ]; then
