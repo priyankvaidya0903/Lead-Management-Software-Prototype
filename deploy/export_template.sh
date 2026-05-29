@@ -14,8 +14,8 @@ DB_NAME="default"
 
 OUTPUT_FILE="twenty_template.sql"
 
-# Run pg_dump inside the container
-docker exec -t $DB_CONTAINER pg_dump -U $DB_USER -d $DB_NAME -c -O -x > $OUTPUT_FILE
+# Run pg_dump inside the container (removed -c flag to prevent DROP statements crashing the init)
+docker exec -t $DB_CONTAINER pg_dump -U $DB_USER -d $DB_NAME -O -x > $OUTPUT_FILE
 
 echo "✅ Successfully exported to $OUTPUT_FILE!"
 echo "Note: This template includes your dummy leads. When spinning up a new clinic, you can simply delete the dummy leads from the UI."
