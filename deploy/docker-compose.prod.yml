@@ -62,7 +62,7 @@ services:
       test: pg_isready -U ${PG_DATABASE_USER:-postgres} -h localhost -d default
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 60
     restart: always
 
   redis:
