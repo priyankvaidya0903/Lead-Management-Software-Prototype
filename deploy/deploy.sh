@@ -23,9 +23,13 @@ echo "🚀 Deploying new isolated Twenty CRM instance for: $CLINIC_NAME ($CLINIC
 DEPLOY_DIR="/opt/twentycrm/$CLINIC_SLUG"
 mkdir -p "$DEPLOY_DIR"
 
+# Get the directory where the script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+
 # 2. Copy the production Docker Compose and the Database Template
-cp docker-compose.prod.yml "$DEPLOY_DIR/"
-cp twenty_template.sql "$DEPLOY_DIR/"
+cp "$SCRIPT_DIR/docker-compose.prod.yml" "$DEPLOY_DIR/"
+cp "$ROOT_DIR/twenty_template.sql" "$DEPLOY_DIR/"
 
 # 3. Generate a secure random encryption key for this clinic's CRM
 ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')
