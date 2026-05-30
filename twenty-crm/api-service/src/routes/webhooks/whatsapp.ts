@@ -204,6 +204,10 @@ router.post("/", async (req: Request, res: Response) => {
     const stage = headerStage || leadData?.stage;
     const leadId = leadData?.id || req.headers["id"];
 
+    console.log(`[WhatsApp Webhook] Received webhook from Twenty CRM! Lead ID: ${leadId}, Stage: ${stage}`);
+    console.log(`[WhatsApp Webhook] Full Payload:`, JSON.stringify(payload, null, 2));
+    console.log(`[WhatsApp Webhook] Headers:`, JSON.stringify(req.headers, null, 2));
+
     let phoneNumber = headerPhone || "";
     if (!phoneNumber) {
       const phoneObj = leadData?.phone;
@@ -217,6 +221,7 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     if (!phoneNumber) {
+      console.error(`[WhatsApp Webhook] Error: No phone number found for lead ${leadId}`);
       res.status(400).json({ error: "No phone number found" });
       return;
     }
@@ -225,6 +230,7 @@ router.post("/", async (req: Request, res: Response) => {
     if (cleanPhoneNumber.length === 10) {
       cleanPhoneNumber = `91${cleanPhoneNumber}`;
     }
+    console.log(`[WhatsApp Webhook] Parsed phone number: ${phoneNumber} -> ${cleanPhoneNumber}`);
 
     // ─── STAGE: REQ BY WHATSAPP ─────────────────────────────────────────────────
     if (stage === "REQ_BY_WHATSAPP") {
@@ -291,6 +297,7 @@ router.post("/", async (req: Request, res: Response) => {
       }
 
       if (!metaAccessToken || !metaPhoneNumberId) {
+        console.warn("[WhatsApp Webhook] Meta credentials not set. Simulating NOT_PICKING_UP message.");
         return res.json({ success: true, simulated: true });
       }
 
@@ -315,13 +322,16 @@ router.post("/", async (req: Request, res: Response) => {
 
       const responseData = await response.json();
       if (!response.ok) {
+        console.error(`[WhatsApp Webhook] Failed to send NOT_PICKING_UP message. Meta API responded with:`, JSON.stringify(responseData, null, 2));
         if (leadId && redis) await redis.del(`whatsapp_sent:${leadId}:${stage}`);
         return res.status(500).json({ error: "Failed to send Meta message", details: responseData });
       }
 
+      console.log(`[WhatsApp Webhook] Successfully sent NOT_PICKING_UP Meta message! Message ID:`, responseData?.messages?.[0]?.id);
       return res.json({ success: true, messageId: responseData?.messages?.[0]?.id });
     }
 
+    console.log(`[WhatsApp Webhook] Webhook ignored. Stage "${stage}" is not configured for WhatsApp triggers.`);
     res.json({ message: "Stage ignored" });
 
   } catch (error) {
