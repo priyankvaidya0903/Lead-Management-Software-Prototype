@@ -143,13 +143,13 @@ export async function findLeadByPhone(phoneNumber: string): Promise<{ id: string
     // 2. Try exact match with + prefix
     leads = await fetchLead(`+${phoneNumber}`);
     if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
-    
+
     // 3. Try stripping India country code (91)
     if (phoneNumber.startsWith('91')) {
       leads = await fetchLead(phoneNumber.substring(2));
       if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
     }
-    
+
     // 4. Try stripping US country code (1)
     if (phoneNumber.startsWith('1')) {
       leads = await fetchLead(phoneNumber.substring(1));
@@ -174,11 +174,11 @@ export async function createLeadNote(leadId: string, text: string): Promise<bool
     const targetRes = await fetch(`${apiUrl}/noteTargets?filter=targetLeadsId[eq]:${leadId}&limit=10`, {
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
     });
-    
+
     if (targetRes.ok) {
       const targetData = await targetRes.json();
       const targets = targetData?.data?.noteTargets ?? targetData?.noteTargets ?? targetData?.data ?? [];
-      
+
       const notePromises = targets.map((target: any) => {
         if (target.noteId) {
           return fetch(`${apiUrl}/notes/${target.noteId}`, {
@@ -189,7 +189,7 @@ export async function createLeadNote(leadId: string, text: string): Promise<bool
       });
 
       const noteResults = await Promise.all(notePromises);
-      
+
       for (const noteData of noteResults) {
         if (!noteData) continue;
         const note = noteData?.data?.note ?? noteData?.note ?? noteData?.data ?? noteData;
@@ -215,7 +215,7 @@ export async function createLeadNote(leadId: string, text: string): Promise<bool
       } catch (e) {
         console.warn("[TwentyCRM] Could not parse existing blocknote, starting fresh array.");
       }
-      
+
       blocks.push({ type: "paragraph", content: formattedMessage });
 
       await fetch(`${apiUrl}/notes/${transcriptNote.id}`, {
@@ -242,10 +242,10 @@ export async function createLeadNote(leadId: string, text: string): Promise<bool
       });
       const noteData = await response.json();
       if (!response.ok) {
-          console.error("[TwentyCRM] Note creation failed:", noteData);
-          return false;
+        console.error("[TwentyCRM] Note creation failed:", noteData);
+        return false;
       }
-      
+
       // Create NoteTarget relationship via GraphQL
       const noteId = noteData?.data?.createNote?.id ?? noteData?.data?.notes?.id ?? noteData?.data?.id ?? noteData?.id;
       if (noteId) {
@@ -294,10 +294,10 @@ export async function createEscalationTask(leadId: string, managerId: string, me
     });
     const taskData = await response.json();
     if (!response.ok) {
-        console.error("[TwentyCRM] Task creation failed:", taskData);
-        return false;
+      console.error("[TwentyCRM] Task creation failed:", taskData);
+      return false;
     }
-    
+
     // Create TaskTarget relationship via GraphQL
     const taskId = taskData?.data?.createTask?.id ?? taskData?.data?.tasks?.id ?? taskData?.data?.id ?? taskData?.id;
     if (taskId) {
@@ -339,7 +339,7 @@ export async function updateLeadStage(leadId: string, newStage: string): Promise
         stage: newStage
       })
     });
-    
+
     if (!response.ok) {
       console.error("[TwentyCRM] Failed to update lead stage:", await response.text());
       return false;
@@ -362,7 +362,7 @@ export async function updateLeadFields(leadId: string, fields: Record<string, an
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify(fields)
     });
-    
+
     if (!response.ok) {
       console.error("[TwentyCRM] Lead update failed:", await response.text());
       return false;
@@ -374,7 +374,7 @@ export async function updateLeadFields(leadId: string, fields: Record<string, an
   }
 }
 
-export async function getClinicsList(): Promise<{id: string, name: string}[]> {
+export async function getClinicsList(): Promise<{ id: string, name: string }[]> {
   const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
   const apiKey = process.env.TWENTY_API_KEY;
   if (!apiKey) return [];
@@ -384,7 +384,7 @@ export async function getClinicsList(): Promise<{id: string, name: string}[]> {
       method: "GET",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     });
-    
+
     if (response.ok) {
       const data = await response.json();
       const clinics = data?.data?.clinicss ?? data?.clinicss ?? data?.data ?? [];
@@ -394,5 +394,29 @@ export async function getClinicsList(): Promise<{id: string, name: string}[]> {
   } catch (e) {
     console.error("[TwentyCRM] Error fetching clinics list:", e);
     return [];
+  }
+}
+export async function getLeadDetails(leadId: string): Promise<any> {
+  const apiUrl = process.env.TWENTY_API_URL || "http://localhost:3000/rest";
+  const apiKey = process.env.TWENTY_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = `${apiUrl}/leadss/${leadId}`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }
+    });
+
+    if (!response.ok) {
+      console.error("[TwentyCRM] Failed to fetch lead details:", await response.text());
+      return null;
+    }
+
+    const data = await response.json();
+    return data?.data?.leadss ?? data?.leadss ?? data?.data ?? data;
+  } catch (e) {
+    console.error("[TwentyCRM] Error fetching lead details:", e);
+    return null;
   }
 }

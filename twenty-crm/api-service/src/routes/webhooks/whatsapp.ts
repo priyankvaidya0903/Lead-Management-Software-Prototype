@@ -1,11 +1,11 @@
 import { Router, Request, Response } from "express";
 import Redis from "ioredis";
-import { 
-  findLeadByPhone, createLeadNote, createEscalationTask, updateLeadStage, updateLeadFields, getClinicsList, getManagersForClinic 
+import {
+  findLeadByPhone, createLeadNote, createEscalationTask, updateLeadStage, updateLeadFields, getClinicsList, getManagersForClinic
 } from "../../lib/twentyCrmClient.js";
 import { getNextManagerIndex } from "../../lib/roundRobin.js";
-import { 
-  sendWhatsAppText, sendWhatsAppInteractiveList, sendWhatsAppInteractiveButtons 
+import {
+  sendWhatsAppText, sendWhatsAppInteractiveList, sendWhatsAppInteractiveButtons
 } from "../../lib/whatsapp.js";
 
 const router = Router();
@@ -44,15 +44,15 @@ router.post("/", async (req: Request, res: Response) => {
       const entry = payload.entry?.[0];
       const changes = entry?.changes?.[0];
       const value = changes?.value;
-      
+
       if (value?.messages && value.messages.length > 0) {
         const message = value.messages[0];
-        const fromNumber = message.from; 
-        
+        const fromNumber = message.from;
+
         // Extract text depending on message type (text vs interactive reply)
         let messageText = "";
         let interactiveId = "";
-        
+
         if (message.type === "text") {
           messageText = message.text?.body || "";
         } else if (message.type === "interactive") {
@@ -66,12 +66,12 @@ router.post("/", async (req: Request, res: Response) => {
         }
 
         console.log(`[WhatsApp Webhook] Received incoming message from ${fromNumber}: "${messageText}"`);
-        
+
         const lead = await findLeadByPhone(fromNumber);
         if (lead) {
           console.log(`[WhatsApp Webhook] Found matching lead ${lead.id}. Logging note...`);
           await createLeadNote(lead.id, `User said: ${messageText}`);
-          
+
           // ─── STATEFUL CHATBOT LOGIC ───
           if (redis) {
             const botStateKey = `bot_state:${lead.id}`;
@@ -79,13 +79,13 @@ router.post("/", async (req: Request, res: Response) => {
 
             if (currentState) {
               console.log(`[WhatsApp Bot] Processing state ${currentState} for lead ${lead.id}`);
-              
+
               if (currentState === "AWAITING_REPLY") {
                 await sendWhatsAppText(fromNumber, "Thanks! To start, what is your full name?");
                 await redis.set(botStateKey, "AWAITING_NAME", "EX", 86400);
                 return res.json({ success: true, message: "Handled AWAITING_REPLY" });
               }
-              
+
               if (currentState === "AWAITING_NAME") {
                 await updateLeadFields(lead.id, { name: messageText });
                 await sendWhatsAppText(fromNumber, "Great! What is your email address?");
@@ -96,7 +96,7 @@ router.post("/", async (req: Request, res: Response) => {
               if (currentState === "AWAITING_EMAIL") {
                 // Twenty CRM expects the email field to be an object for PATCH requests
                 await updateLeadFields(lead.id, { emails: [{ primaryEmail: messageText, emailsLabel: "Work" }] });
-                
+
                 // Fetch clinics to build interactive list
                 const clinics = await getClinicsList();
                 if (clinics.length > 0) {
@@ -107,7 +107,7 @@ router.post("/", async (req: Request, res: Response) => {
                 } else {
                   await sendWhatsAppText(fromNumber, "Which clinic location are you interested in?");
                 }
-                
+
                 await redis.set(botStateKey, "AWAITING_CLINIC", "EX", 86400);
                 return res.json({ success: true, message: "Handled AWAITING_EMAIL" });
               }
@@ -115,7 +115,7 @@ router.post("/", async (req: Request, res: Response) => {
               if (currentState === "AWAITING_CLINIC") {
                 // If they used the interactive list, we got the clinic ID in interactiveId
                 const clinicId = interactiveId || messageText; // fallback to text if they didn't use list
-                
+
                 // If interactiveId is present, we know it's a valid ID. Otherwise, it might just be text, which Twenty CRM might reject.
                 // We'll try to update it anyway. In a production app, we'd do a fuzzy search if interactiveId is missing.
                 if (interactiveId) {
@@ -131,7 +131,7 @@ router.post("/", async (req: Request, res: Response) => {
                     console.error("[WhatsApp Bot] Failed to assign manager", e);
                   }
 
-                  await updateLeadFields(lead.id, { 
+                  await updateLeadFields(lead.id, {
                     clinicId: interactiveId,
                     ...(managerIdToAssign && { relationshipManagerId: managerIdToAssign })
                   });
@@ -142,7 +142,7 @@ router.post("/", async (req: Request, res: Response) => {
                   { id: "SPECIALIZED_TREATMENT", title: "Specialized Treatment" },
                   { id: "FOLLOW_UP", title: "Follow up" }
                 ];
-                
+
                 await sendWhatsAppInteractiveList(fromNumber, "Treatments", "Lastly, what treatment are you looking for?", "View Treatments", [
                   { title: "Available Treatments", rows: treatments }
                 ]);
@@ -158,13 +158,10 @@ router.post("/", async (req: Request, res: Response) => {
                 } else {
                   treatmentVal = messageText.toUpperCase().replace(/\s+/g, "_");
                 }
-                
-                await updateLeadFields(lead.id, { 
-                  treatment: [treatmentVal],
-                  source: ["WHATSAPP"]
-                });
+
+                await updateLeadFields(lead.id, { treatment: treatmentVal });
                 await updateLeadStage(lead.id, "REQUIREMENTS_GATHERED");
-                
+
                 await sendWhatsAppText(fromNumber, "Thank you! All set. Our manager will reach out to you shortly.");
                 await redis.del(botStateKey);
                 return res.json({ success: true, message: "Handled AWAITING_TREATMENT (Completed)" });
@@ -186,7 +183,7 @@ router.post("/", async (req: Request, res: Response) => {
         } else {
           console.log(`[WhatsApp Webhook] No matching lead found for phone number ${fromNumber}.`);
         }
-        
+
         res.json({ success: true, message: "Incoming message processed" });
         return;
       }
@@ -234,7 +231,7 @@ router.post("/", async (req: Request, res: Response) => {
       if (leadId && redis) {
         const botStateKey = `bot_state:${leadId}`;
         const idempotencyKey = `whatsapp_sent:${leadId}:${stage}`;
-        
+
         // *** IDEMPOTENCY DISABLED FOR TESTING ***
         // const lock = await redis.set(idempotencyKey, "sent", "EX", 86400, "NX");
         // if (!lock) {
@@ -281,7 +278,7 @@ router.post("/", async (req: Request, res: Response) => {
         return res.json({ success: true, messageId: responseData?.messages?.[0]?.id });
       }
     }
-    
+
     // ─── STAGE: NOT PICKING UP ──────────────────────────────────────────────────
     if (stage === "NOT_PICKING_UP") {
       if (leadId && redis) {

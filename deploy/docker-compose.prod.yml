@@ -77,6 +77,19 @@ services:
       timeout: 5s
       retries: 10
 
+  api-service:
+    build: ./api-service
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./api-service/.env
+    environment:
+      - PORT=3002
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: always
+
 volumes:
   db-data:
   server-local-data:

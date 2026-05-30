@@ -27,9 +27,10 @@ mkdir -p "$DEPLOY_DIR"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# 2. Copy the production Docker Compose and the Database Template
+# 2. Copy the production Docker Compose, the Database Template, and the API Service
 cp "$SCRIPT_DIR/docker-compose.prod.yml" "$DEPLOY_DIR/"
 cp "$ROOT_DIR/twenty_template.sql" "$DEPLOY_DIR/"
+cp -r "$ROOT_DIR/twenty-crm/api-service" "$DEPLOY_DIR/"
 
 # 3. Use the MASTER encryption keys so the cloned database can be decrypted!
 # If you generate new keys, the cloned user accounts and workspaces will break.
@@ -46,7 +47,7 @@ else
   echo "⚠️ No domain provided. Falling back to Public IP: $FINAL_SERVER_URL"
 fi
 
-# 5. Generate the .env file
+# 5. Generate the .env file for Twenty CRM
 cat <<EOF > "$DEPLOY_DIR/.env"
 # Environment configuration for $CLINIC_NAME
 SERVER_URL=$FINAL_SERVER_URL
@@ -55,10 +56,15 @@ ENCRYPTION_KEY=$ENCRYPTION_KEY
 APP_SECRET=$APP_SECRET
 EOF
 
-# 5. Boot it up!
+# 6. Setup the API Service .env
+echo "TWENTY_API_URL=http://server:3000/rest" >> "$DEPLOY_DIR/api-service/.env"
+echo "TWENTY_WORKFLOW_WEBHOOK_URL=http://api-service:3002/api/webhooks/whatsapp" >> "$DEPLOY_DIR/api-service/.env"
+echo "REDIS_URL=redis://redis:6379" >> "$DEPLOY_DIR/api-service/.env"
+
+# 7. Boot it up!
 cd "$DEPLOY_DIR"
 echo "⏳ Spinning up containers..."
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.prod.yml up -d --build
 
 echo "✅ Success!"
 echo "--------------------------------------------------------"
