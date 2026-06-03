@@ -341,11 +341,8 @@ async function main() {
     // Delete any members cloned from the source
     await run(`DELETE FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
     
-    // Re-insert the original target members, mapping their roleId
+    // Re-insert the original target members
     for (const member of targetMembers) {
-      // Map role to new admin role if we have it
-      member.roleId = newRoleId || member.roleId; 
-      
       const colNames = Object.keys(member).map(quoteIdentifier).join(", ");
       const placeholders = Object.keys(member).map((_, i) => `$${i + 1}`).join(", ");
       const values = Object.values(member);
@@ -354,6 +351,15 @@ async function main() {
         `INSERT INTO ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember" (${colNames}) VALUES (${placeholders})`,
         values
       );
+
+      // Re-assign them to the cloned admin role via core.roleTarget
+      if (newRoleId) {
+        await run(
+          `INSERT INTO core."roleTarget" (id, "workspaceId", "roleId", "workspaceMemberId", "createdAt", "updatedAt") 
+           VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+          [crypto.randomUUID(), targetWorkspace.id, newRoleId, member.id]
+        );
+      }
     }
   }
 
