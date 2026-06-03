@@ -180,7 +180,8 @@ async function main() {
     'core."viewGroup"', 
     'core."viewSort"', 
     'core.webhook', 
-    'core.agent'
+    'core.agent',
+    'core."workspaceMember"'
   ];
   
   // 1. Fetch all rows
