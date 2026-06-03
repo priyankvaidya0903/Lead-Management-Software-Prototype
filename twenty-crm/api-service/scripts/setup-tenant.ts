@@ -7,7 +7,21 @@ const DATABASE_URL = process.env.PG_DATABASE_URL || process.env.DATABASE_URL || 
 const client = new Client({ connectionString: DATABASE_URL });
 
 async function runPsql(query: string) { 
-  await client.query(query); 
+  try {
+    await client.query(query); 
+  } catch (err: any) {
+    if (err.constraint) {
+      const res = await client.query(`SELECT conname, pg_get_constraintdef(c.oid), conrelid::regclass as table_name FROM pg_constraint c WHERE conname = '${err.constraint}'`);
+      if (res.rows.length > 0) {
+        console.error(`\n🚨 CONSTRAINT VIOLATION 🚨`);
+        console.error(`Table: ${res.rows[0].table_name}`);
+        console.error(`Constraint: ${res.rows[0].conname}`);
+        console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
+        console.error(`Query that failed: ${query}`);
+      }
+    }
+    throw err;
+  }
 }
 
 function sqlString(value: any) {
