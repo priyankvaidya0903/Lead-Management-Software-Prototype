@@ -148,6 +148,7 @@ async function main() {
 
   // Tables to clone with their dependencies in correct order
   const tablesToClone = [
+    'core."userWorkspace"',
     'core.application',
     'core."applicationVariable"',
     'core."dataSource"', 
@@ -164,8 +165,7 @@ async function main() {
     'core."viewGroup"', 
     'core."viewSort"', 
     'core.webhook', 
-    'core.agent',
-    'core."userWorkspace"'
+    'core.agent'
   ];
   
   // 1. Fetch all rows
