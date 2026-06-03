@@ -155,6 +155,13 @@ async function main() {
           row[key] = idMap.get(value);
         }
       }
+      
+      // Specifically handle core.application unique constraints
+      if (table === 'core.application') {
+        if (row.universalIdentifier) row.universalIdentifier = crypto.randomUUID();
+        if (row.packageJsonFileId) row.packageJsonFileId = null;
+        if (row.yarnLockFileId) row.yarnLockFileId = null;
+      }
     }
   }
 
