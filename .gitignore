@@ -1,3 +1,4 @@
 .env
 .env.local
 twenty-crm/.env
+twenty-crm/api-service/node_modules

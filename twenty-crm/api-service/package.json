@@ -10,10 +10,12 @@
     "setup-tenant": "tsx scripts/setup-tenant.ts"
   },
   "dependencies": {
+    "@types/pg": "^8.20.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
-    "ioredis": "^5.10.1"
+    "ioredis": "^5.10.1",
+    "pg": "^8.21.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
