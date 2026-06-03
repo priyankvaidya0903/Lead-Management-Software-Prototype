@@ -142,7 +142,9 @@ async function deleteTargetCoreData(targetWorkspaceId: string) {
     'core."rolePermissionFlag"',
     'core.role',
     'core."relationMetadata"',
+    'core.relation',
     'core."indexMetadata"',
+    'core.index',
     'core."fieldMetadata"',
     'core."objectMetadata"',
     'core."dataSource"',
@@ -152,7 +154,23 @@ async function deleteTargetCoreData(targetWorkspaceId: string) {
     'core.application',
   ];
 
+  // Filter out tables that do not exist in the database
+  const validTables = [];
   for (const table of tables) {
+    const tableName = table.replace('core."', '').replace('"', '');
+    const res = await rows<{ count: string }>(
+      `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'core' AND table_name = $1`,
+      [tableName]
+    );
+    if (Number(res[0].count) > 0) {
+      validTables.push(table);
+    }
+  }
+
+  // Disable FK constraints
+  await run("SET CONSTRAINTS ALL DEFERRED");
+
+  for (const table of validTables) {
     await run(`DELETE FROM ${table} WHERE "workspaceId" = $1`, [targetWorkspaceId]);
   }
 }
@@ -207,7 +225,9 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
     'core."objectMetadata"',
     'core."fieldMetadata"',
     'core."indexMetadata"',
+    'core.index',
     'core."relationMetadata"',
+    'core.relation',
     'core.role',
     'core."rolePermissionFlag"',
     'core."roleTarget"',
@@ -222,12 +242,25 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
     'core.agent',
   ];
 
-  const dataByTable: Record<string, Row[]> = {};
+  // Filter out tables that do not exist in the database
+  const validTables = [];
+  for (const table of tables) {
+    const tableName = table.replace('core."', '').replace('"', '');
+    const res = await rows<{ count: string }>(
+      `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'core' AND table_name = $1`,
+      [tableName]
+    );
+    if (Number(res[0].count) > 0) {
+      validTables.push(table);
+    }
+  }
+
   const idMap = new Map<string, string>();
+  const dataByTable: Record<string, Row[]> = {};
 
   idMap.set(sourceWorkspaceId, targetWorkspaceId);
 
-  for (const table of tables) {
+  for (const table of validTables) {
     const tableRows = await fetchWorkspaceRows(table, sourceWorkspaceId);
     dataByTable[table] = tableRows;
 
@@ -238,8 +271,9 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
     }
   }
 
-  for (const table of tables) {
-    for (const row of dataByTable[table]) {
+  for (const table of validTables) {
+    const tableRows = dataByTable[table] || [];
+    for (const row of tableRows) {
       for (const [key, value] of Object.entries(row)) {
         if (typeof value === "string" && idMap.has(value)) {
           row[key] = idMap.get(value);
