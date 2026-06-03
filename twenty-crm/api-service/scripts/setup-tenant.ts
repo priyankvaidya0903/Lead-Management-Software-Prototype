@@ -343,6 +343,9 @@ async function main() {
     
     // Re-insert the original target members
     for (const member of targetMembers) {
+      // Remove generated columns to avoid insertion errors
+      delete member.searchVector;
+      
       const colNames = Object.keys(member).map(quoteIdentifier).join(", ");
       const placeholders = Object.keys(member).map((_, i) => `$${i + 1}`).join(", ");
       const values = Object.values(member);
