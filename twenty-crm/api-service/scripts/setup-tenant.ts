@@ -218,12 +218,13 @@ async function main() {
           colNames.push(`"${key}"`);
           const dtype = colTypeMap.get(key)!;
           if (dtype === 'json' || dtype === 'jsonb') {
-            // Stringify objects/arrays/primitives for jsonb columns
             if (value === null || value === undefined) {
               values.push(null);
               placeholders.push(`$${idx}::jsonb`);
             } else {
-              values.push(typeof value === 'string' ? value : JSON.stringify(value));
+              // ALWAYS JSON.stringify for jsonb — turns JS string 'uuid' into '"uuid"',
+              // number 0 into '0', object {} into '{}', etc. All valid JSON.
+              values.push(JSON.stringify(value));
               placeholders.push(`$${idx}::jsonb`);
             }
           } else {
