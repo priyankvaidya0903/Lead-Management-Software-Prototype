@@ -313,6 +313,9 @@ async function main() {
 
   // BACKUP the workspaceMember from target before wiping
   const targetMembers = await rows(`SELECT * FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
+  
+  // BACKUP roleTarget from target before wiping
+  const targetRoleTargets = await rows(`SELECT * FROM core."roleTarget" WHERE "workspaceId" = $1`, [targetWorkspace.id]);
 
   await deleteTargetCoreData(targetWorkspace.id);
   await recreateTargetSchemaFromSource(sourceWorkspace.databaseSchema, targetWorkspace.databaseSchema);
@@ -354,42 +357,30 @@ async function main() {
         `INSERT INTO ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember" (${colNames}) VALUES (${placeholders})`,
         values
       );
+    }
+  }
 
-      // Re-assign them to the cloned admin role via core.roleTarget
-      if (newRoleId) {
-        // Dynamically find the column name for the user link in core.roleTarget
-        const rtCols = await rows<{ column_name: string }>(
-          `SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'roleTarget'`
-        );
-        const colNamesArr = rtCols.map(c => c.column_name);
-        
-        let targetCol = "";
-        let targetVal = null;
-        if (colNamesArr.includes("userId")) {
-          targetCol = `"userId"`;
-          targetVal = member.userId;
-        } else if (colNamesArr.includes("workspaceMemberId")) {
-          targetCol = `"workspaceMemberId"`;
-          targetVal = member.id;
-        } else if (colNamesArr.includes("userWorkspaceId")) {
-           // We would need the userWorkspace ID, but let's try to fetch it
-           const uw = await rows<{ id: string }>(`SELECT id FROM core."userWorkspace" WHERE "userId" = $1 AND "workspaceId" = $2 LIMIT 1`, [member.userId, targetWorkspace.id]);
-           if (uw.length > 0) {
-             targetCol = `"userWorkspaceId"`;
-             targetVal = uw[0].id;
-           }
-        }
-
-        if (targetCol && targetVal) {
-          await run(
-            `INSERT INTO core."roleTarget" (id, "workspaceId", "roleId", ${targetCol}, "createdAt", "updatedAt") 
-             VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-            [crypto.randomUUID(), targetWorkspace.id, newRoleId, targetVal]
-          );
-        } else {
-           console.warn(`Could not determine how to link role to member in core.roleTarget. Columns found: ${colNamesArr.join(", ")}`);
-        }
+  // RESTORE roleTargets back, pointing to the new cloned admin role
+  if (targetRoleTargets.length > 0 && newRoleId) {
+    for (const rt of targetRoleTargets) {
+      // Use the newly cloned role
+      rt.roleId = newRoleId;
+      // Generate a new ID just in case
+      rt.id = crypto.randomUUID();
+      
+      // If there's a universalIdentifier, generate a new one so it doesn't conflict
+      if (rt.universalIdentifier) {
+        rt.universalIdentifier = crypto.randomUUID();
       }
+
+      const colNames = Object.keys(rt).map(quoteIdentifier).join(", ");
+      const placeholders = Object.keys(rt).map((_, i) => `$${i + 1}`).join(", ");
+      const values = Object.values(rt);
+      
+      await run(
+        `INSERT INTO core."roleTarget" (${colNames}) VALUES (${placeholders})`,
+        values
+      );
     }
   }
 
