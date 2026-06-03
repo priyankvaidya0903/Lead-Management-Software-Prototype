@@ -319,7 +319,6 @@ async function main() {
   if (sourceWorkspace.defaultRoleId && idMap.has(sourceWorkspace.defaultRoleId)) {
     const newRoleId = idMap.get(sourceWorkspace.defaultRoleId);
     await run(`UPDATE core.workspace SET "defaultRoleId" = $1 WHERE id = $2`, [newRoleId, targetWorkspace.id]);
-    await run(`UPDATE core."userWorkspace" SET "roleId" = $1 WHERE "workspaceId" = $2`, [newRoleId, targetWorkspace.id]);
   }
 
   await run("COMMIT");
