@@ -6,6 +6,7 @@ const { Client } = pg;
 const DATABASE_URL = process.env.PG_DATABASE_URL || process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/default";
 const client = new Client({ connectionString: DATABASE_URL });
 
+// Use parameterized queries for DDL/simple SQL
 async function runPsql(query: string) { 
   try {
     await client.query(query); 
@@ -17,37 +18,39 @@ async function runPsql(query: string) {
         console.error(`Table: ${res.rows[0].table_name}`);
         console.error(`Constraint: ${res.rows[0].conname}`);
         console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
-        console.error(`Query that failed: ${query}`);
       }
     } else {
       console.error(`\n🚨 SQL ERROR 🚨`);
       console.error(`Error: ${err.message}`);
-      console.error(`Query that failed: ${query.substring(0, 1000)}...`);
     }
     throw err;
   }
 }
 
-function sqlString(value: any, columnType?: string) {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-  if (typeof value === 'number') return value.toString();
-
-  if (columnType === 'json' || columnType === 'jsonb') {
-    let parsed;
-    try {
-      parsed = typeof value === 'string' ? JSON.parse(value) : value;
-    } catch(e) {
-      parsed = value;
+// Use parameterized insert — pg driver handles ALL type coercion
+async function insertRow(table: string, colNames: string[], values: any[]) {
+  const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+  const colsSql = colNames.map(c => `"${c}"`).join(', ');
+  const query = `INSERT INTO ${table} (${colsSql}) VALUES (${placeholders});`;
+  try {
+    await client.query(query, values);
+  } catch (err: any) {
+    if (err.constraint) {
+      const res = await client.query(`SELECT conname, pg_get_constraintdef(c.oid), conrelid::regclass as table_name FROM pg_constraint c WHERE conname = '${err.constraint}'`);
+      if (res.rows.length > 0) {
+        console.error(`\n🚨 CONSTRAINT VIOLATION 🚨`);
+        console.error(`Table: ${res.rows[0].table_name}`);
+        console.error(`Constraint: ${res.rows[0].conname}`);
+        console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
+      }
+    } else {
+      console.error(`\n🚨 SQL ERROR 🚨`);
+      console.error(`Error: ${err.message}`);
+      console.error(`Table: ${table}`);
+      console.error(`Columns: ${colNames.join(', ')}`);
     }
-    return `'${JSON.stringify(parsed).replace(/'/g, "''")}'`;
+    throw err;
   }
-
-  if (typeof value === 'object') {
-    if (value instanceof Date) return `'${value.toISOString()}'`;
-    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
-  }
-  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 async function queryRows<T = any>(query: string): Promise<T[]> { 
@@ -85,6 +88,7 @@ async function main() {
   const targetSchema = `workspace_${crypto.randomBytes(12).toString("hex")}`;
   console.log(`🚀 Cloning schema ${source.databaseSchema} -> ${targetSchema}...`);
 
+  // Clone schema structure
   const tables = await queryRows(`SELECT table_name FROM information_schema.tables WHERE table_schema = '${source.databaseSchema}' AND table_type = 'BASE TABLE';`);
   await runPsql(`CREATE SCHEMA "${targetSchema}";`);
   for (const { table_name } of tables) {
@@ -103,6 +107,7 @@ async function main() {
 
   console.log("✅ Schema cloned. Copying data...");
 
+  // Copy workspace data (use server-side SQL copy to avoid type issues)
   for (const { table_name } of tables) {
     const columns = await queryRows<{ column_name: string }>(`
       SELECT column_name
@@ -120,9 +125,11 @@ async function main() {
 
   console.log("✅ Data copied. Cloning core records...");
 
+  // Clone workspace record using server-side SQL (no type issues)
   const inviteHash = crypto.randomUUID();
   await runPsql(`INSERT INTO core.workspace (id, "displayName", logo, "inviteHash", "deletedAt", "createdAt", "updatedAt", "allowImpersonation", "isPublicInviteLinkEnabled", "activationStatus", "metadataVersion", "databaseSchema", subdomain, "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", "isCustomDomainEnabled", "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled") SELECT '${targetWorkspaceId}', '${name}', logo, '${inviteHash}', NULL, NOW(), NOW(), "allowImpersonation", "isPublicInviteLinkEnabled", 'ACTIVE', "metadataVersion", '${targetSchema}', '${subdomain}', "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", 'false', "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled" FROM core.workspace WHERE id = '${source.id}';`);
 
+  // Tables to clone with their dependencies in correct order
   const tablesToClone = [
     'core.application',
     'core."applicationVariable"',
@@ -146,8 +153,9 @@ async function main() {
   // 1. Fetch all rows
   const tableData: Record<string, any[]> = {};
   for (const table of tablesToClone) {
-    const rows = await queryRows(`SELECT * FROM ${table} WHERE "workspaceId" = '${source.id}';`);
-    tableData[table] = rows;
+    const tRows = await queryRows(`SELECT * FROM ${table} WHERE "workspaceId" = '${source.id}';`);
+    tableData[table] = tRows;
+    console.log(`  Fetched ${tRows.length} rows from ${table}`);
   }
 
   // 2. Generate new IDs and map them
@@ -171,7 +179,7 @@ async function main() {
         }
       }
       
-      // Specifically handle core.application unique constraints
+      // Handle core.application unique constraints
       if (table === 'core.application') {
         if (row.universalIdentifier) row.universalIdentifier = crypto.randomUUID();
         if (row.packageJsonFileId) row.packageJsonFileId = null;
@@ -180,40 +188,38 @@ async function main() {
     }
   }
 
-  // 4. Insert rows back with valid columns
+  // 4. Insert rows using PARAMETERIZED QUERIES (pg driver handles all types automatically)
   for (const table of tablesToClone) {
-    const rows = tableData[table];
-    if (rows.length === 0) continue;
+    const tRows = tableData[table];
+    if (tRows.length === 0) continue;
 
     const schemaName = table.split('.')[0];
     const tableNameClean = table.split('.')[1].replace(/"/g, "");
 
-    const columns = await queryRows<{ column_name: string, data_type: string }>(`
-      SELECT column_name, data_type
+    const columns = await queryRows<{ column_name: string }>(`
+      SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = '${schemaName}'
         AND table_name = '${tableNameClean}'
         AND is_generated = 'NEVER';
     `);
-    const validCols = new Map<string, string>();
-    for (const c of columns) {
-      validCols.set(c.column_name, c.data_type);
-    }
+    const validCols = new Set(columns.map(c => c.column_name));
 
-    for (const row of rows) {
-      const cols = [];
-      const vals = [];
+    for (const row of tRows) {
+      const colNames: string[] = [];
+      const values: any[] = [];
       for (const [key, value] of Object.entries(row)) {
         if (validCols.has(key)) {
-          cols.push(`"${key}"`);
-          vals.push(sqlString(value as any, validCols.get(key)!));
+          colNames.push(key);
+          values.push(value);
         }
       }
-      await runPsql(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
+      await insertRow(table, colNames, values);
     }
+    console.log(`  ✅ Inserted ${tRows.length} rows into ${table}`);
   }
 
-  console.log("✅ Workspace clone complete!");
+  console.log("\n✅ Workspace clone complete!");
   console.log(`Workspace ID: ${targetWorkspaceId}`);
   console.log(`Subdomain: ${subdomain}`);
   console.log(`Schema: ${targetSchema}`);
