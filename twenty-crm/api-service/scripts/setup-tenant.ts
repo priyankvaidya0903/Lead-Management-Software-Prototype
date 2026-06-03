@@ -19,6 +19,10 @@ async function runPsql(query: string) {
         console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
         console.error(`Query that failed: ${query}`);
       }
+    } else {
+      console.error(`\n🚨 SQL ERROR 🚨`);
+      console.error(`Error: ${err.message}`);
+      console.error(`Query that failed: ${query.substring(0, 1000)}...`);
     }
     throw err;
   }
