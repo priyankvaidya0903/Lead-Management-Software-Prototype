@@ -25,6 +25,7 @@ type WorkspaceRow = {
 };
 
 const client = new Client({ connectionString: DATABASE_URL });
+console.log("Script initialized");
 
 function usage() {
   console.error(
@@ -329,6 +330,7 @@ async function cloneCoreWorkspaceRecords(source: WorkspaceRow, target: { id: str
 }
 
 async function main() {
+  console.log("Starting main function", process.argv.slice(2));
   const { name, subdomain, customDomain, copyData } = parseArgs(process.argv.slice(2));
 
   if (!name || !subdomain) {
@@ -341,6 +343,9 @@ async function main() {
   const targetSchema = randomSchemaName();
 
   console.log(`Cloning workspace ${source.id} (${source.databaseSchema}) to ${subdomain}...`);
+
+  await client.connect();
+  console.log("Connected to database");
 
   await ensureWorkspaceDoesNotExist(subdomain, customDomain);
   await cloneWorkspaceSchema(source.databaseSchema, targetSchema);
@@ -360,6 +365,8 @@ async function main() {
   if (customDomain) {
     console.log(`Custom domain: ${customDomain}`);
   }
+  
+  await client.end();
 }
 
 main().catch((error) => {
