@@ -84,9 +84,65 @@ async function main() {
   await runPsql(`INSERT INTO core.workspace (id, "displayName", logo, "inviteHash", "deletedAt", "createdAt", "updatedAt", "allowImpersonation", "isPublicInviteLinkEnabled", "activationStatus", "metadataVersion", "databaseSchema", subdomain, "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", "isCustomDomainEnabled", "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled") SELECT '${targetWorkspaceId}', '${name}', logo, '${inviteHash}', NULL, NOW(), NOW(), "allowImpersonation", "isPublicInviteLinkEnabled", 'ACTIVE', "metadataVersion", '${targetSchema}', '${subdomain}', "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", 'false', "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled" FROM core.workspace WHERE id = '${source.id}';`);
 
   const tablesToClone = ['core."dataSource"', 'core."objectMetadata"', 'core."fieldMetadata"', 'core.role', 'core."rolePermissionFlag"', 'core."roleTarget"', 'core.view', 'core."viewField"', 'core."viewFieldGroup"', 'core."viewFilter"', 'core."viewFilterGroup"', 'core."viewGroup"', 'core."viewSort"', 'core.webhook', 'core.application', 'core."applicationVariable"', 'core.agent'];
+  
+  // 1. Fetch all rows
+  const tableData: Record<string, any[]> = {};
   for (const table of tablesToClone) {
-    await runPsql(`INSERT INTO ${table} SELECT * FROM ${table} WHERE "workspaceId" = '${source.id}';`);
-    await runPsql(`UPDATE ${table} SET "workspaceId" = '${targetWorkspaceId}' WHERE "workspaceId" = '${source.id}';`);
+    const rows = await queryRows(`SELECT * FROM ${table} WHERE "workspaceId" = '${source.id}';`);
+    tableData[table] = rows;
+  }
+
+  // 2. Generate new IDs and map them
+  const idMap = new Map<string, string>();
+  idMap.set(source.id, targetWorkspaceId);
+
+  for (const table of tablesToClone) {
+    for (const row of tableData[table]) {
+      if (row.id) {
+        idMap.set(row.id, crypto.randomUUID());
+      }
+    }
+  }
+
+  // 3. Replace all references to old IDs
+  for (const table of tablesToClone) {
+    for (const row of tableData[table]) {
+      for (const [key, value] of Object.entries(row)) {
+        if (typeof value === 'string' && idMap.has(value)) {
+          row[key] = idMap.get(value);
+        }
+      }
+    }
+  }
+
+  // 4. Insert rows back with valid columns
+  for (const table of tablesToClone) {
+    const rows = tableData[table];
+    if (rows.length === 0) continue;
+
+    const schemaName = table.split('.')[0];
+    const tableName = table.split('.')[1].replace(/"/g, "'");
+
+    const columns = await queryRows<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = '${schemaName}'
+        AND table_name = ${tableName}
+        AND is_generated = 'NEVER';
+    `);
+    const validCols = new Set(columns.map(c => c.column_name));
+
+    for (const row of rows) {
+      const cols = [];
+      const vals = [];
+      for (const [key, value] of Object.entries(row)) {
+        if (validCols.has(key)) {
+          cols.push(`"${key}"`);
+          vals.push(sqlString(value as any));
+        }
+      }
+      await runPsql(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
+    }
   }
 
   console.log("✅ Workspace clone complete!");
