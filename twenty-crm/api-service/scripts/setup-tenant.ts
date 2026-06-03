@@ -170,6 +170,12 @@ async function main() {
     wRow.workspaceCustomApplicationId = newAppId;
   }
 
+  if (wRow.defaultRoleId) {
+    const newRoleId = crypto.randomUUID();
+    idMap.set(wRow.defaultRoleId, newRoleId);
+    wRow.defaultRoleId = newRoleId;
+  }
+
   const wCols = await queryRows<{ column_name: string; data_type: string }>(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
   const wColTypeMap = new Map<string, string>();
   for (const c of wCols) {
