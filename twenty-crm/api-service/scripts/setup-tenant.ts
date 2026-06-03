@@ -94,7 +94,25 @@ async function main() {
   const inviteHash = crypto.randomUUID();
   await runPsql(`INSERT INTO core.workspace (id, "displayName", logo, "inviteHash", "deletedAt", "createdAt", "updatedAt", "allowImpersonation", "isPublicInviteLinkEnabled", "activationStatus", "metadataVersion", "databaseSchema", subdomain, "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", "isCustomDomainEnabled", "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled") SELECT '${targetWorkspaceId}', '${name}', logo, '${inviteHash}', NULL, NOW(), NOW(), "allowImpersonation", "isPublicInviteLinkEnabled", 'ACTIVE', "metadataVersion", '${targetSchema}', '${subdomain}', "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", 'false', "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled" FROM core.workspace WHERE id = '${source.id}';`);
 
-  const tablesToClone = ['core."dataSource"', 'core."objectMetadata"', 'core."fieldMetadata"', 'core.role', 'core."rolePermissionFlag"', 'core."roleTarget"', 'core.view', 'core."viewField"', 'core."viewFieldGroup"', 'core."viewFilter"', 'core."viewFilterGroup"', 'core."viewGroup"', 'core."viewSort"', 'core.webhook', 'core.application', 'core."applicationVariable"', 'core.agent'];
+  const tablesToClone = [
+    'core.application',
+    'core."applicationVariable"',
+    'core."dataSource"', 
+    'core."objectMetadata"', 
+    'core."fieldMetadata"', 
+    'core.role', 
+    'core."rolePermissionFlag"', 
+    'core."roleTarget"', 
+    'core.view', 
+    'core."viewFieldGroup"',
+    'core."viewField"', 
+    'core."viewFilterGroup"',
+    'core."viewFilter"', 
+    'core."viewGroup"', 
+    'core."viewSort"', 
+    'core.webhook', 
+    'core.agent'
+  ];
   
   // 1. Fetch all rows
   const tableData: Record<string, any[]> = {};
