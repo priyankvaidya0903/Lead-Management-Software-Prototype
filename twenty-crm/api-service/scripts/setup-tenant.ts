@@ -181,7 +181,7 @@ async function main() {
     'core."viewSort"', 
     'core.webhook', 
     'core.agent',
-    'core."workspaceMember"'
+    'core."userWorkspace"'
   ];
   
   // 1. Fetch all rows
