@@ -144,9 +144,33 @@ async function main() {
   
 
 
-  // Clone workspace record using server-side SQL (no type issues)
-  const inviteHash = crypto.randomUUID();
-  await runPsql(`INSERT INTO core.workspace (id, "displayName", logo, "inviteHash", "deletedAt", "createdAt", "updatedAt", "allowImpersonation", "isPublicInviteLinkEnabled", "activationStatus", "metadataVersion", "databaseSchema", subdomain, "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", "isCustomDomainEnabled", "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled") SELECT '${targetWorkspaceId}', '${name}', logo, '${inviteHash}', NULL, NOW(), NOW(), "allowImpersonation", "isPublicInviteLinkEnabled", 'ACTIVE', "metadataVersion", '${targetSchema}', '${subdomain}', "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", 'false', "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled" FROM core.workspace WHERE id = '${source.id}';`);
+  // Clone workspace record dynamically to ensure all columns (even newly added ones) are copied
+  const workspaceRows = await queryRows(`SELECT * FROM core.workspace WHERE id = '${source.id}';`);
+  const wRow = workspaceRows[0];
+  wRow.id = targetWorkspaceId;
+  wRow.displayName = name;
+  wRow.inviteHash = crypto.randomUUID();
+  wRow.databaseSchema = targetSchema;
+  wRow.subdomain = subdomain;
+  wRow.createdAt = new Date();
+  wRow.updatedAt = new Date();
+  wRow.deletedAt = null;
+
+  const wCols = await queryRows<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
+  const validWCols = new Set(wCols.map(c => c.column_name));
+  const wColNames = [];
+  const wValues = [];
+  for (const [key, value] of Object.entries(wRow)) {
+    if (validWCols.has(key)) {
+      wColNames.push(key);
+      wValues.push(value);
+    }
+  }
+  
+  // We can use the same parameterized logic as insertRow but written inline to avoid changing insertRow signature
+  const wPlaceholders = wValues.map((_, i) => `$${i + 1}`).join(', ');
+  const wColsSql = wColNames.map(c => `"${c}"`).join(', ');
+  await client.query(`INSERT INTO core.workspace (${wColsSql}) VALUES (${wPlaceholders});`, wValues.map(v => typeof v === 'object' && v !== null && !(v instanceof Date) ? JSON.stringify(v) : v));
 
   // Tables to clone with their dependencies in correct order
   const tablesToClone = [
@@ -268,6 +292,43 @@ async function main() {
       }
     }
     console.log(`  ✅ Inserted ${tRows.length} rows into ${table}`);
+  }
+
+  console.log("✅ Mapping old core IDs to new core IDs inside the tenant schema...");
+  for (const { table_name } of tables) {
+    const uuidCols = await queryRows<{ column_name: string }>(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_schema = '${targetSchema}' 
+        AND table_name = '${table_name}' 
+        AND data_type = 'uuid';
+    `);
+
+    if (uuidCols.length > 0) {
+      // Build a temporary mapping table in memory to bulk update
+      const mappings = Array.from(idMap.entries());
+      if (mappings.length > 0) {
+        // Create a temporary table for the map to do a fast join update
+        await runPsql(`CREATE TEMP TABLE id_map_temp (old_id uuid, new_id uuid) ON COMMIT DROP;`);
+        
+        // Insert in batches of 1000
+        for (let i = 0; i < mappings.length; i += 1000) {
+          const batch = mappings.slice(i, i + 1000);
+          const vals = batch.map(m => `('${m[0]}', '${m[1]}')`).join(',');
+          await runPsql(`INSERT INTO id_map_temp (old_id, new_id) VALUES ${vals};`);
+        }
+
+        for (const col of uuidCols) {
+          await runPsql(`
+            UPDATE "${targetSchema}"."${table_name}" t
+            SET "${col.column_name}" = m.new_id
+            FROM id_map_temp m
+            WHERE t."${col.column_name}" = m.old_id;
+          `);
+        }
+        await runPsql(`DROP TABLE id_map_temp;`);
+      }
+    }
   }
 
   // Re-enable foreign key checks
