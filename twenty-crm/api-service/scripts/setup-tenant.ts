@@ -357,11 +357,38 @@ async function main() {
 
       // Re-assign them to the cloned admin role via core.roleTarget
       if (newRoleId) {
-        await run(
-          `INSERT INTO core."roleTarget" (id, "workspaceId", "roleId", "workspaceMemberId", "createdAt", "updatedAt") 
-           VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-          [crypto.randomUUID(), targetWorkspace.id, newRoleId, member.id]
+        // Dynamically find the column name for the user link in core.roleTarget
+        const rtCols = await rows<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'roleTarget'`
         );
+        const colNamesArr = rtCols.map(c => c.column_name);
+        
+        let targetCol = "";
+        let targetVal = null;
+        if (colNamesArr.includes("userId")) {
+          targetCol = `"userId"`;
+          targetVal = member.userId;
+        } else if (colNamesArr.includes("workspaceMemberId")) {
+          targetCol = `"workspaceMemberId"`;
+          targetVal = member.id;
+        } else if (colNamesArr.includes("userWorkspaceId")) {
+           // We would need the userWorkspace ID, but let's try to fetch it
+           const uw = await rows<{ id: string }>(`SELECT id FROM core."userWorkspace" WHERE "userId" = $1 AND "workspaceId" = $2 LIMIT 1`, [member.userId, targetWorkspace.id]);
+           if (uw.length > 0) {
+             targetCol = `"userWorkspaceId"`;
+             targetVal = uw[0].id;
+           }
+        }
+
+        if (targetCol && targetVal) {
+          await run(
+            `INSERT INTO core."roleTarget" (id, "workspaceId", "roleId", ${targetCol}, "createdAt", "updatedAt") 
+             VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+            [crypto.randomUUID(), targetWorkspace.id, newRoleId, targetVal]
+          );
+        } else {
+           console.warn(`Could not determine how to link role to member in core.roleTarget. Columns found: ${colNamesArr.join(", ")}`);
+        }
       }
     }
   }
