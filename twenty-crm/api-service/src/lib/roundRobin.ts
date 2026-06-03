@@ -13,17 +13,20 @@ import Redis from "ioredis";
 
 let redisClient: Redis | null = null;
 
-function getRedisClient(): Redis {
+export function getRedisClient(): Redis | null {
   if (!redisClient) {
-    const url = process.env.REDIS_URL || "redis://localhost:6379";
-    redisClient = new Redis(url, {
+    if (!process.env.REDIS_URL) {
+      console.warn("[ioredis] REDIS_URL not set. Running in stateless local mode.");
+      return null;
+    }
+    redisClient = new Redis(process.env.REDIS_URL, {
       maxRetriesPerRequest: 3,
-      connectTimeout: 5000,
-      lazyConnect: true,
+      enableReadyCheck: false,
+      retryStrategy: (times) => Math.min(times * 50, 2000),
     });
 
     redisClient.on("error", (err) => {
-      console.error("[RoundRobin] Redis connection error:", err.message);
+      console.error("[ioredis] Error:", err.message);
     });
   }
   return redisClient;
@@ -45,6 +48,11 @@ export async function getNextManagerIndex(
   }
 
   const redis = getRedisClient();
+  if (!redis) {
+    // Stateless fallback: pick random index if Redis isn't running
+    return Math.floor(Math.random() * totalManagers);
+  }
+  
   const key = `rr:clinic:${clinicId}`;
 
   // INCR is atomic — safe under concurrent requests
@@ -59,6 +67,7 @@ export async function getNextManagerIndex(
  */
 export async function getRoundRobinState(clinicId: string): Promise<number | null> {
   const redis = getRedisClient();
+  if (!redis) return null;
   const value = await redis.get(`rr:clinic:${clinicId}`);
   return value ? parseInt(value, 10) : null;
 }
@@ -68,6 +77,31 @@ export async function getRoundRobinState(clinicId: string): Promise<number | nul
  */
 export async function resetRoundRobin(clinicId: string): Promise<void> {
   const redis = getRedisClient();
+  if (!redis) return;
   await redis.del(`rr:clinic:${clinicId}`);
   console.log(`[RoundRobin] Counter reset for clinic: ${clinicId}`);
+}
+
+export async function getNextManagerId(clinicId: string, managerIds: string[]): Promise<string | null> {
+  if (managerIds.length === 0) return null;
+  if (managerIds.length === 1) return managerIds[0];
+
+  const redis = getRedisClient();
+  if (!redis) {
+    // Stateless fallback: just pick random if Redis isn't running
+    return managerIds[Math.floor(Math.random() * managerIds.length)];
+  }
+
+  const key = `rr:clinic:${clinicId}:counter`;
+  const counter = await redis.incr(key);
+  const index = (counter - 1) % managerIds.length;
+  
+  return managerIds[index];
+}
+
+export async function getCurrentManagerId(clinicId: string): Promise<string | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+  const value = await redis.get(`rr:clinic:${clinicId}`);
+  return value || null;
 }
