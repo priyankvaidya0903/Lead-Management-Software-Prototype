@@ -10,6 +10,17 @@ async function runPsql(query: string) {
   await client.query(query); 
 }
 
+function sqlString(value: any) {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'object') {
+    if (value instanceof Date) return `'${value.toISOString()}'`;
+    return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
+  }
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
 async function queryRows<T = any>(query: string): Promise<T[]> { 
   const result = await client.query(query); 
   return result.rows; 
