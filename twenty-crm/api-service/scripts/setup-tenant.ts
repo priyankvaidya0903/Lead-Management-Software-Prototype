@@ -54,9 +54,11 @@ async function main() {
   await client.connect();
   console.log("✅ Connected.");
 
-  // Disable ALL foreign key checks for the entire session (requires superuser)
+  await runPsql("BEGIN;");
+
+  // Disable ALL foreign key checks for the entire transaction (requires superuser)
   // This completely bypasses all FK ordering issues for both deletes and inserts
-  await runPsql("SET session_replication_role = 'replica';");
+  await runPsql("SET LOCAL session_replication_role = 'replica';");
 
   // Clean up: if a workspace with this subdomain already exists (from a failed run), delete it
   const existing = await queryRows(`SELECT id, "databaseSchema" FROM core.workspace WHERE subdomain = '${subdomain}';`);
@@ -155,6 +157,9 @@ async function main() {
   wRow.createdAt = new Date();
   wRow.updatedAt = new Date();
   wRow.deletedAt = null;
+  wRow.logoFileId = null;
+  wRow.customDomain = null;
+  wRow.workspaceCustomApplicationId = null; // Important: This is often uniquely constrained across workspaces
 
   const wCols = await queryRows<{ column_name: string; data_type: string }>(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
   const wColTypeMap = new Map<string, string>();
@@ -186,7 +191,16 @@ async function main() {
     }
   }
   
-  await client.query(`INSERT INTO core.workspace (${wColNames.join(', ')}) VALUES (${wPlaceholders.join(', ')});`, wValues);
+  try {
+    await client.query(`INSERT INTO core.workspace (${wColNames.join(', ')}) VALUES (${wPlaceholders.join(', ')});`, wValues);
+  } catch (err: any) {
+    console.error(`\n🚨 SQL ERROR on core.workspace INSERT 🚨`);
+    console.error(`Error: ${err.message}`);
+    if (err.constraint) {
+      console.error(`Constraint: ${err.constraint}`);
+    }
+    throw err;
+  }
 
   // Tables to clone with their dependencies in correct order
   const tablesToClone = [
@@ -347,8 +361,7 @@ async function main() {
     }
   }
 
-  // Re-enable foreign key checks
-  await runPsql("SET session_replication_role = 'origin';");
+  await runPsql("COMMIT;");
 
   console.log("\n✅ Workspace clone complete!");
   console.log(`Workspace ID: ${targetWorkspaceId}`);
@@ -357,7 +370,11 @@ async function main() {
   await client.end();
 }
 
-main().catch((err: any) => { 
-  console.error("❌ Failed:", err.message); 
-  process.exit(1); 
+main().catch(async (err: any) => {
+  try {
+    await client.query("ROLLBACK;");
+  } catch {}
+  await client.end().catch(() => {});
+  console.error("❌ Failed:", err.message);
+  process.exit(1);
 });
