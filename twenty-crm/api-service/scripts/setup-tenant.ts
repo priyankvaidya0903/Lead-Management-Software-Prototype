@@ -64,7 +64,18 @@ async function main() {
   console.log("✅ Schema cloned. Copying data...");
 
   for (const { table_name } of tables) {
-    await runPsql(`INSERT INTO "${targetSchema}"."${table_name}" SELECT * FROM "${source.databaseSchema}"."${table_name}";`);
+    const columns = await queryRows<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = '${source.databaseSchema}'
+        AND table_name = '${table_name}'
+        AND is_generated = 'NEVER';
+    `);
+
+    if (columns.length > 0) {
+      const colNames = columns.map((c) => `"${c.column_name}"`).join(', ');
+      await runPsql(`INSERT INTO "${targetSchema}"."${table_name}" (${colNames}) SELECT ${colNames} FROM "${source.databaseSchema}"."${table_name}";`);
+    }
   }
 
   console.log("✅ Data copied. Cloning core records...");
