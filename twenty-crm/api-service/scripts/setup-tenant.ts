@@ -188,7 +188,7 @@ async function main() {
     }
   }
 
-  // 4. Insert rows using PARAMETERIZED QUERIES (pg driver handles all types automatically)
+  // 4. Insert rows using PARAMETERIZED QUERIES with explicit jsonb casts
   for (const table of tablesToClone) {
     const tRows = tableData[table];
     if (tRows.length === 0) continue;
@@ -196,25 +196,63 @@ async function main() {
     const schemaName = table.split('.')[0];
     const tableNameClean = table.split('.')[1].replace(/"/g, "");
 
-    const columns = await queryRows<{ column_name: string }>(`
-      SELECT column_name
+    const columns = await queryRows<{ column_name: string; data_type: string }>(`
+      SELECT column_name, data_type
       FROM information_schema.columns
       WHERE table_schema = '${schemaName}'
         AND table_name = '${tableNameClean}'
         AND is_generated = 'NEVER';
     `);
-    const validCols = new Set(columns.map(c => c.column_name));
+    const colTypeMap = new Map<string, string>();
+    for (const c of columns) {
+      colTypeMap.set(c.column_name, c.data_type);
+    }
 
     for (const row of tRows) {
       const colNames: string[] = [];
       const values: any[] = [];
+      const placeholders: string[] = [];
+      let idx = 1;
       for (const [key, value] of Object.entries(row)) {
-        if (validCols.has(key)) {
-          colNames.push(key);
-          values.push(value);
+        if (colTypeMap.has(key)) {
+          colNames.push(`"${key}"`);
+          const dtype = colTypeMap.get(key)!;
+          if (dtype === 'json' || dtype === 'jsonb') {
+            // Stringify objects/arrays/primitives for jsonb columns
+            if (value === null || value === undefined) {
+              values.push(null);
+              placeholders.push(`$${idx}::jsonb`);
+            } else {
+              values.push(typeof value === 'string' ? value : JSON.stringify(value));
+              placeholders.push(`$${idx}::jsonb`);
+            }
+          } else {
+            values.push(value);
+            placeholders.push(`$${idx}`);
+          }
+          idx++;
         }
       }
-      await insertRow(table, colNames, values);
+      const query = `INSERT INTO ${table} (${colNames.join(', ')}) VALUES (${placeholders.join(', ')});`;
+      try {
+        await client.query(query, values);
+      } catch (err: any) {
+        if (err.constraint) {
+          const res = await client.query(`SELECT conname, pg_get_constraintdef(c.oid), conrelid::regclass as table_name FROM pg_constraint c WHERE conname = '${err.constraint}'`);
+          if (res.rows.length > 0) {
+            console.error(`\n🚨 CONSTRAINT VIOLATION 🚨`);
+            console.error(`Table: ${res.rows[0].table_name}`);
+            console.error(`Constraint: ${res.rows[0].conname}`);
+            console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
+          }
+        } else {
+          console.error(`\n🚨 SQL ERROR 🚨`);
+          console.error(`Error: ${err.message}`);
+          console.error(`Table: ${table}`);
+          console.error(`Columns: ${colNames.join(', ')}`);
+        }
+        throw err;
+      }
     }
     console.log(`  ✅ Inserted ${tRows.length} rows into ${table}`);
   }
