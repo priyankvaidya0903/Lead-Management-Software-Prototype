@@ -70,6 +70,30 @@ async function main() {
   await client.connect();
   console.log("✅ Connected.");
 
+  // Clean up: if a workspace with this subdomain already exists (from a failed run), delete it
+  const existing = await queryRows(`SELECT id, "databaseSchema" FROM core.workspace WHERE subdomain = '${subdomain}';`);
+  if (existing.length > 0) {
+    console.log(`🧹 Found existing workspace for subdomain "${subdomain}", cleaning up...`);
+    for (const old of existing) {
+      const coreTables = [
+        'core.agent', 'core.webhook',
+        'core."viewSort"', 'core."viewGroup"', 'core."viewFilter"', 'core."viewFilterGroup"',
+        'core."viewField"', 'core."viewFieldGroup"', 'core.view',
+        'core."roleTarget"', 'core."rolePermissionFlag"', 'core.role',
+        'core."fieldMetadata"', 'core."objectMetadata"', 'core."dataSource"',
+        'core."applicationVariable"', 'core.application',
+      ];
+      for (const t of coreTables) {
+        await client.query(`DELETE FROM ${t} WHERE "workspaceId" = $1`, [old.id]).catch(() => {});
+      }
+      if (old.databaseSchema) {
+        await client.query(`DROP SCHEMA IF EXISTS "${old.databaseSchema}" CASCADE`).catch(() => {});
+      }
+      await client.query(`DELETE FROM core.workspace WHERE id = $1`, [old.id]);
+      console.log(`  🗑️ Deleted old workspace ${old.id} (${old.databaseSchema})`);
+    }
+  }
+
   console.log("🔍 Looking for a source workspace...");
   const rows = await queryRows(`SELECT id, "databaseSchema" FROM core.workspace ORDER BY "createdAt" ASC LIMIT 1;`);
   
