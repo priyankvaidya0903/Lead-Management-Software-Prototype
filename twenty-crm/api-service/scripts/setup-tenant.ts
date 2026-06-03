@@ -156,21 +156,37 @@ async function main() {
   wRow.updatedAt = new Date();
   wRow.deletedAt = null;
 
-  const wCols = await queryRows<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
-  const validWCols = new Set(wCols.map(c => c.column_name));
+  const wCols = await queryRows<{ column_name: string; data_type: string }>(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
+  const wColTypeMap = new Map<string, string>();
+  for (const c of wCols) {
+    wColTypeMap.set(c.column_name, c.data_type);
+  }
+
   const wColNames = [];
   const wValues = [];
+  const wPlaceholders = [];
+  let wIdx = 1;
   for (const [key, value] of Object.entries(wRow)) {
-    if (validWCols.has(key)) {
-      wColNames.push(key);
-      wValues.push(value);
+    if (wColTypeMap.has(key)) {
+      wColNames.push(`"${key}"`);
+      const dtype = wColTypeMap.get(key)!;
+      if (dtype === 'json' || dtype === 'jsonb') {
+        if (value === null || value === undefined) {
+          wValues.push(null);
+          wPlaceholders.push(`$${wIdx}::jsonb`);
+        } else {
+          wValues.push(JSON.stringify(value));
+          wPlaceholders.push(`$${wIdx}::jsonb`);
+        }
+      } else {
+        wValues.push(value);
+        wPlaceholders.push(`$${wIdx}`);
+      }
+      wIdx++;
     }
   }
   
-  // We can use the same parameterized logic as insertRow but written inline to avoid changing insertRow signature
-  const wPlaceholders = wValues.map((_, i) => `$${i + 1}`).join(', ');
-  const wColsSql = wColNames.map(c => `"${c}"`).join(', ');
-  await client.query(`INSERT INTO core.workspace (${wColsSql}) VALUES (${wPlaceholders});`, wValues.map(v => typeof v === 'object' && v !== null && !(v instanceof Date) ? JSON.stringify(v) : v));
+  await client.query(`INSERT INTO core.workspace (${wColNames.join(', ')}) VALUES (${wPlaceholders.join(', ')});`, wValues);
 
   // Tables to clone with their dependencies in correct order
   const tablesToClone = [
