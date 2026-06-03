@@ -150,13 +150,13 @@ async function main() {
     if (rows.length === 0) continue;
 
     const schemaName = table.split('.')[0];
-    const tableName = table.split('.')[1].replace(/"/g, "'");
+    const tableNameClean = table.split('.')[1].replace(/"/g, "");
 
     const columns = await queryRows<{ column_name: string }>(`
       SELECT column_name
       FROM information_schema.columns
       WHERE table_schema = '${schemaName}'
-        AND table_name = ${tableName}
+        AND table_name = '${tableNameClean}'
         AND is_generated = 'NEVER';
     `);
     const validCols = new Set(columns.map(c => c.column_name));
