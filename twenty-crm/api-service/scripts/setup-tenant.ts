@@ -17,6 +17,7 @@ type WorkspaceRef = {
   subdomain: string | null;
   displayName: string;
   defaultRoleId: string | null;
+  workspaceCustomApplicationId: string | null;
 };
 
 function getArg(name: string) {
@@ -36,7 +37,7 @@ async function rows<T = Row>(query: string, values?: any[]): Promise<T[]> {
 
 async function getWorkspaceBySubdomain(subdomain: string): Promise<WorkspaceRef> {
   const result = await rows<WorkspaceRef>(
-    `SELECT id, "databaseSchema", subdomain, "displayName", "defaultRoleId"
+    `SELECT id, "databaseSchema", subdomain, "displayName", "defaultRoleId", "workspaceCustomApplicationId"
      FROM core.workspace
      WHERE subdomain = $1
      LIMIT 1`,
@@ -310,15 +311,50 @@ async function main() {
     throw new Error("Source and target workspace cannot be the same");
   }
 
+  // BACKUP the workspaceMember from target before wiping
+  const targetMembers = await rows(`SELECT * FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
+
   await deleteTargetCoreData(targetWorkspace.id);
   await recreateTargetSchemaFromSource(sourceWorkspace.databaseSchema, targetWorkspace.databaseSchema);
   const idMap = await cloneCoreWorkspaceData(sourceWorkspace.id, targetWorkspace.id);
   await remapSchemaUuids(targetWorkspace.databaseSchema, idMap);
 
-  // Restore User Access and Default Role
-  if (sourceWorkspace.defaultRoleId && idMap.has(sourceWorkspace.defaultRoleId)) {
-    const newRoleId = idMap.get(sourceWorkspace.defaultRoleId);
+  // Restore Default Role and Custom App
+  const newRoleId = sourceWorkspace.defaultRoleId && idMap.has(sourceWorkspace.defaultRoleId) 
+    ? idMap.get(sourceWorkspace.defaultRoleId) 
+    : null;
+    
+  if (newRoleId) {
     await run(`UPDATE core.workspace SET "defaultRoleId" = $1 WHERE id = $2`, [newRoleId, targetWorkspace.id]);
+  }
+
+  const newAppId = sourceWorkspace.workspaceCustomApplicationId && idMap.has(sourceWorkspace.workspaceCustomApplicationId)
+    ? idMap.get(sourceWorkspace.workspaceCustomApplicationId)
+    : null;
+
+  if (newAppId) {
+    await run(`UPDATE core.workspace SET "workspaceCustomApplicationId" = $1 WHERE id = $2`, [newAppId, targetWorkspace.id]);
+  }
+
+  // RESTORE workspaceMembers into the target schema
+  if (targetMembers.length > 0) {
+    // Delete any members cloned from the source
+    await run(`DELETE FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
+    
+    // Re-insert the original target members, mapping their roleId
+    for (const member of targetMembers) {
+      // Map role to new admin role if we have it
+      member.roleId = newRoleId || member.roleId; 
+      
+      const colNames = Object.keys(member).map(quoteIdentifier).join(", ");
+      const placeholders = Object.keys(member).map((_, i) => `$${i + 1}`).join(", ");
+      const values = Object.values(member);
+      
+      await run(
+        `INSERT INTO ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember" (${colNames}) VALUES (${placeholders})`,
+        values
+      );
+    }
   }
 
   await run("COMMIT");
