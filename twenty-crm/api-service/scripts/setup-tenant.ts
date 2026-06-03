@@ -149,6 +149,15 @@ async function main() {
 
   console.log("✅ Data copied. Cloning core records...");
 
+
+
+
+
+  
+  // Wrap ALL core inserts in a transaction so DEFERRABLE constraints are checked at COMMIT
+  await runPsql('BEGIN;');
+  await runPsql('SET CONSTRAINTS ALL DEFERRED;');
+
   // Clone workspace record using server-side SQL (no type issues)
   const inviteHash = crypto.randomUUID();
   await runPsql(`INSERT INTO core.workspace (id, "displayName", logo, "inviteHash", "deletedAt", "createdAt", "updatedAt", "allowImpersonation", "isPublicInviteLinkEnabled", "activationStatus", "metadataVersion", "databaseSchema", subdomain, "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", "isCustomDomainEnabled", "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled") SELECT '${targetWorkspaceId}', '${name}', logo, '${inviteHash}', NULL, NOW(), NOW(), "allowImpersonation", "isPublicInviteLinkEnabled", 'ACTIVE', "metadataVersion", '${targetSchema}', '${subdomain}', "isGoogleAuthEnabled", "isTwoFactorAuthenticationEnforced", "isPasswordAuthEnabled", "isMicrosoftAuthEnabled", 'false', "defaultRoleId", "trashRetentionDays", "routerModel", "isGoogleAuthBypassEnabled", "isPasswordAuthBypassEnabled", "isMicrosoftAuthBypassEnabled", "workspaceCustomApplicationId", "editableProfileFields", "fastModel", "smartModel", "eventLogRetentionDays", "useRecommendedModels", "isInternalMessagesImportEnabled" FROM core.workspace WHERE id = '${source.id}';`);
@@ -281,6 +290,9 @@ async function main() {
     }
     console.log(`  ✅ Inserted ${tRows.length} rows into ${table}`);
   }
+
+  // Commit the transaction — all deferred FK constraints are checked NOW
+  await runPsql('COMMIT;');
 
   console.log("\n✅ Workspace clone complete!");
   console.log(`Workspace ID: ${targetWorkspaceId}`);
