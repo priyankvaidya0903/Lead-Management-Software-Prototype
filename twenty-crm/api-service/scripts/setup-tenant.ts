@@ -159,7 +159,16 @@ async function main() {
   wRow.deletedAt = null;
   wRow.logoFileId = null;
   wRow.customDomain = null;
-  wRow.workspaceCustomApplicationId = null; // Important: This is often uniquely constrained across workspaces
+
+  // Initialize idMap early to map the unique application ID
+  const idMap = new Map<string, string>();
+  idMap.set(source.id, targetWorkspaceId);
+
+  if (wRow.workspaceCustomApplicationId) {
+    const newAppId = crypto.randomUUID();
+    idMap.set(wRow.workspaceCustomApplicationId, newAppId);
+    wRow.workspaceCustomApplicationId = newAppId;
+  }
 
   const wCols = await queryRows<{ column_name: string; data_type: string }>(`SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'core' AND table_name = 'workspace' AND is_generated = 'NEVER';`);
   const wColTypeMap = new Map<string, string>();
@@ -232,13 +241,10 @@ async function main() {
     console.log(`  Fetched ${tRows.length} rows from ${table}`);
   }
 
-  // 2. Generate new IDs and map them
-  const idMap = new Map<string, string>();
-  idMap.set(source.id, targetWorkspaceId);
-
+  // 2. Generate new IDs and map them (preserving any early mappings like workspaceCustomApplicationId)
   for (const table of tablesToClone) {
     for (const row of tableData[table]) {
-      if (row.id) {
+      if (row.id && !idMap.has(row.id)) {
         idMap.set(row.id, crypto.randomUUID());
       }
     }
