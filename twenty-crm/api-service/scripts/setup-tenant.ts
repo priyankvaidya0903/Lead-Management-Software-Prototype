@@ -28,10 +28,21 @@ async function runPsql(query: string) {
   }
 }
 
-function sqlString(value: any) {
+function sqlString(value: any, columnType?: string) {
   if (value === null || value === undefined) return "NULL";
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
   if (typeof value === 'number') return value.toString();
+
+  if (columnType === 'json' || columnType === 'jsonb') {
+    let parsed;
+    try {
+      parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    } catch(e) {
+      parsed = value;
+    }
+    return `'${JSON.stringify(parsed).replace(/'/g, "''")}'`;
+  }
+
   if (typeof value === 'object') {
     if (value instanceof Date) return `'${value.toISOString()}'`;
     return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
@@ -177,14 +188,17 @@ async function main() {
     const schemaName = table.split('.')[0];
     const tableNameClean = table.split('.')[1].replace(/"/g, "");
 
-    const columns = await queryRows<{ column_name: string }>(`
-      SELECT column_name
+    const columns = await queryRows<{ column_name: string, data_type: string }>(`
+      SELECT column_name, data_type
       FROM information_schema.columns
       WHERE table_schema = '${schemaName}'
         AND table_name = '${tableNameClean}'
         AND is_generated = 'NEVER';
     `);
-    const validCols = new Set(columns.map(c => c.column_name));
+    const validCols = new Map<string, string>();
+    for (const c of columns) {
+      validCols.set(c.column_name, c.data_type);
+    }
 
     for (const row of rows) {
       const cols = [];
@@ -192,7 +206,7 @@ async function main() {
       for (const [key, value] of Object.entries(row)) {
         if (validCols.has(key)) {
           cols.push(`"${key}"`);
-          vals.push(sqlString(value as any));
+          vals.push(sqlString(value as any, validCols.get(key)!));
         }
       }
       await runPsql(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
