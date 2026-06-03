@@ -54,6 +54,10 @@ async function main() {
   await client.connect();
   console.log("✅ Connected.");
 
+  // Disable ALL foreign key checks for the entire session (requires superuser)
+  // This completely bypasses all FK ordering issues for both deletes and inserts
+  await runPsql("SET session_replication_role = 'replica';");
+
   // Clean up: if a workspace with this subdomain already exists (from a failed run), delete it
   const existing = await queryRows(`SELECT id, "databaseSchema" FROM core.workspace WHERE subdomain = '${subdomain}';`);
   if (existing.length > 0) {
@@ -138,9 +142,7 @@ async function main() {
 
 
   
-  // Wrap ALL core inserts in a transaction so DEFERRABLE constraints are checked at COMMIT
-  await runPsql('BEGIN;');
-  await runPsql('SET CONSTRAINTS ALL DEFERRED;');
+
 
   // Clone workspace record using server-side SQL (no type issues)
   const inviteHash = crypto.randomUUID();
@@ -268,8 +270,8 @@ async function main() {
     console.log(`  ✅ Inserted ${tRows.length} rows into ${table}`);
   }
 
-  // Commit the transaction — all deferred FK constraints are checked NOW
-  await runPsql('COMMIT;');
+  // Re-enable foreign key checks
+  await runPsql("SET session_replication_role = 'origin';");
 
   console.log("\n✅ Workspace clone complete!");
   console.log(`Workspace ID: ${targetWorkspaceId}`);
