@@ -256,19 +256,11 @@ async function main() {
       try {
         await client.query(query, values);
       } catch (err: any) {
+        console.error(`\n🚨 SQL ERROR 🚨`);
+        console.error(`Error: ${err.message}`);
+        console.error(`Table: ${table}`);
         if (err.constraint) {
-          const res = await client.query(`SELECT conname, pg_get_constraintdef(c.oid), conrelid::regclass as table_name FROM pg_constraint c WHERE conname = '${err.constraint}'`);
-          if (res.rows.length > 0) {
-            console.error(`\n🚨 CONSTRAINT VIOLATION 🚨`);
-            console.error(`Table: ${res.rows[0].table_name}`);
-            console.error(`Constraint: ${res.rows[0].conname}`);
-            console.error(`Definition: ${res.rows[0].pg_get_constraintdef}`);
-          }
-        } else {
-          console.error(`\n🚨 SQL ERROR 🚨`);
-          console.error(`Error: ${err.message}`);
-          console.error(`Table: ${table}`);
-          console.error(`Columns: ${colNames.join(', ')}`);
+          console.error(`Constraint: ${err.constraint}`);
         }
         throw err;
       }
