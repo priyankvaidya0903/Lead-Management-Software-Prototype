@@ -96,7 +96,6 @@ async function getCustomRelations(workspaceId: string, objectIds: string[]) {
   if (objectIds.length === 0) return [];
   // Build a parameterized IN clause
   const placeholders = objectIds.map((_, i) => `$${i + 2}`).join(", ");
-  return query(
   try {
     return await query(
       `SELECT rm.id, rm."relationType",
