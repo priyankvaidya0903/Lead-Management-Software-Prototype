@@ -375,10 +375,12 @@ async function createRelation(
     toIcon: rel.toIcon || "IconBox",
   };
 
+  const inputTypeName = await introspectMutationInput(token, mutationName);
+
   try {
     const data = await metadataGql(
       token,
-      `mutation($input: CreateOneRelationInput!) {
+      `mutation($input: ${inputTypeName}!) {
         ${mutationName}(input: $input) { id }
       }`,
       { input: { relation: relationInput } },
@@ -389,7 +391,7 @@ async function createRelation(
     try {
       const data = await metadataGql(
         token,
-        `mutation($input: CreateOneRelationInput!) {
+        `mutation($input: ${inputTypeName}!) {
           ${mutationName}(input: $input) { id }
         }`,
         { input: relationInput },
