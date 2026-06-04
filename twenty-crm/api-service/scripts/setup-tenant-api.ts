@@ -98,30 +98,30 @@ async function getCustomRelations(workspaceId: string, objectIds: string[]) {
   const placeholders = objectIds.map((_, i) => `$${i + 2}`).join(", ");
   try {
     return await query(
-      `SELECT rm.id, rm."relationType",
-              rm."fromObjectMetadataId", rm."toObjectMetadataId",
-              ff.name  AS "fromFieldName",  ff.label  AS "fromFieldLabel",  ff.icon AS "fromIcon",
-              tf.name  AS "toFieldName",    tf.label  AS "toFieldLabel",    tf.icon AS "toIcon",
-              fo."nameSingular" AS "fromObjectName",
-              tobj."nameSingular" AS "toObjectName",
-              tobj."isCustom" AS "toObjectIsCustom",
-              fo."isCustom" AS "fromObjectIsCustom"
-       FROM core."relation" rm
-       JOIN core."fieldMetadata" ff   ON ff.id   = rm."fromFieldMetadataId"
-       JOIN core."fieldMetadata" tf   ON tf.id   = rm."toFieldMetadataId"
-       JOIN core."objectMetadata" fo  ON fo.id   = rm."fromObjectMetadataId"
-       JOIN core."objectMetadata" tobj ON tobj.id = rm."toObjectMetadataId"
-       WHERE rm."workspaceId" = $1
-         AND (rm."fromObjectMetadataId" IN (${placeholders})
-              OR rm."toObjectMetadataId" IN (${placeholders}))
-       ORDER BY rm."createdAt"`,
+      `SELECT f1.id,
+              f1.settings->>'relationType' AS "relationType",
+              f1."objectMetadataId" AS "fromObjectMetadataId",
+              f1."relationTargetObjectMetadataId" AS "toObjectMetadataId",
+              f1.name AS "fromFieldName", f1.label AS "fromFieldLabel", f1.icon AS "fromIcon",
+              f2.name AS "toFieldName", f2.label AS "toFieldLabel", f2.icon AS "toIcon",
+              fo1."nameSingular" AS "fromObjectName",
+              fo1."isCustom" AS "fromObjectIsCustom",
+              fo2."nameSingular" AS "toObjectName",
+              fo2."isCustom" AS "toObjectIsCustom"
+       FROM core."fieldMetadata" f1
+       JOIN core."fieldMetadata" f2 ON f2.id = f1."relationTargetFieldMetadataId"
+       JOIN core."objectMetadata" fo1 ON fo1.id = f1."objectMetadataId"
+       JOIN core."objectMetadata" fo2 ON fo2.id = f1."relationTargetObjectMetadataId"
+       WHERE f1."workspaceId" = $1
+         AND f1.type = 'RELATION'
+         AND f1.id < f2.id
+         AND (f1."objectMetadataId" IN (${placeholders}) OR f1."relationTargetObjectMetadataId" IN (${placeholders}))
+       ORDER BY f1."createdAt"`,
       [workspaceId, ...objectIds],
     );
   } catch (e: any) {
-    if (e.message.includes('relation "core.relation" does not exist')) {
-      return [];
-    }
-    throw e;
+    console.error("Relation query failed:", e.message);
+    return [];
   }
 }
 
@@ -573,8 +573,53 @@ async function main() {
       }
     }
 
+    // ── Clone Webhooks ──
+    console.log("\n═══ Phase 8: Cloning Webhooks ═══");
+    const sourceWebhooks = await query(`SELECT * FROM core.webhook WHERE "workspaceId" = $1`, [sourceWs.id]);
+    for (const hw of sourceWebhooks) {
+      try {
+        process.stdout.write(`  Webhook to ${hw.targetUrl}... `);
+        const newId = crypto.randomUUID();
+        await run(
+          `INSERT INTO core.webhook (id, "targetUrl", operations, description, secret, "workspaceId", "createdAt", "updatedAt", "universalIdentifier", "applicationId")
+           VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7, $8)`,
+          [newId, hw.targetUrl, hw.operations, hw.description, hw.secret, targetWs.id, crypto.randomUUID(), hw.applicationId]
+        );
+        console.log("✅");
+      } catch (e: any) {
+        console.log(`❌ ${e.message}`);
+      }
+    }
+
+    // ── Setup Visibility (Navigation Menu Items) ──
+    console.log("\n═══ Phase 9: Creating Navigation Sidebar Items ═══");
+    for (const obj of sourceObjects) {
+      const targetObjectId = objectIdMap.get(obj.id);
+      if (!targetObjectId) continue;
+      
+      try {
+        process.stdout.write(`  Sidebar link for "${obj.labelPlural}"... `);
+        // Only insert if it doesn't already exist for this object in the target workspace
+        const existing = await query(`SELECT id FROM core."navigationMenuItem" WHERE "workspaceId" = $1 AND "targetObjectMetadataId" = $2`, [targetWs.id, targetObjectId]);
+        
+        if (existing.length === 0) {
+          const newId = crypto.randomUUID();
+          await run(
+            `INSERT INTO core."navigationMenuItem" (id, "workspaceId", "targetObjectMetadataId", name, type, "createdAt", "updatedAt", "universalIdentifier")
+             VALUES ($1, $2, $3, $4, 'object', NOW(), NOW(), $5)`,
+            [newId, targetWs.id, targetObjectId, obj.namePlural, crypto.randomUUID()]
+          );
+          console.log("✅");
+        } else {
+          console.log("✅ (already exists)");
+        }
+      } catch (e: any) {
+        console.log(`❌ ${e.message}`);
+      }
+    }
+
     // ── Cleanup ──
-    console.log("\n═══ Phase 8: Cleanup ═══");
+    console.log("\n═══ Phase 10: Cleanup ═══");
     await cleanupTempApiKey(targetWs.id);
     console.log("✅ Temporary API key removed");
 
