@@ -171,13 +171,9 @@ async function deleteTargetCoreData(targetWorkspaceId: string) {
   await run("SET CONSTRAINTS ALL DEFERRED");
 
   for (const table of validTables) {
-    if (table === 'core.application') {
-      // Application doesn't have workspaceId, we must delete it explicitly
-      if (targetWorkspace.workspaceCustomApplicationId) {
-        await run(`DELETE FROM ${table} WHERE id = $1`, [targetWorkspace.workspaceCustomApplicationId]);
-      }
-    } else {
-      await run(`DELETE FROM ${table} WHERE "workspaceId" = $1`, [targetWorkspaceId]);
+    await run(`DELETE FROM ${table} WHERE "workspaceId" = $1`, [targetWorkspaceId]);
+    if (table === 'core.application' && targetWorkspace.workspaceCustomApplicationId) {
+      await run(`DELETE FROM ${table} WHERE id = $1`, [targetWorkspace.workspaceCustomApplicationId]);
     }
   }
 }
@@ -268,13 +264,13 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
   idMap.set(sourceWorkspaceId, targetWorkspaceId);
 
   for (const table of validTables) {
-    let tableRows: Row[] = [];
-    if (table === 'core.application') {
-      if (sourceWorkspace.workspaceCustomApplicationId) {
-        tableRows = await rows(`SELECT * FROM ${table} WHERE id = $1`, [sourceWorkspace.workspaceCustomApplicationId]);
+    const tableRows = await fetchWorkspaceRows(table, sourceWorkspaceId);
+    
+    if (table === 'core.application' && sourceWorkspace.workspaceCustomApplicationId) {
+      const customApp = await rows(`SELECT * FROM ${table} WHERE id = $1`, [sourceWorkspace.workspaceCustomApplicationId]);
+      if (customApp.length > 0 && !tableRows.some((r: any) => r.id === customApp[0].id)) {
+        tableRows.push(customApp[0]);
       }
-    } else {
-      tableRows = await fetchWorkspaceRows(table, sourceWorkspaceId);
     }
     
     dataByTable[table] = tableRows;
@@ -295,9 +291,7 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
         }
       }
 
-      if (table !== "core.application") {
-        row.workspaceId = targetWorkspaceId;
-      }
+      row.workspaceId = targetWorkspaceId;
 
       if (table === "core.application") {
         row.packageJsonFileId = null;
