@@ -538,6 +538,14 @@ async function cloneWorkflows(
   // Columns to ALWAYS exclude from INSERT (generated/computed columns)
   const excludeCols = new Set(['searchVector']);
 
+  /** Serialize a value for safe pg INSERT — stringify JS objects for JSONB columns */
+  const pgSafe = (val: any): any => {
+    if (val == null) return val;
+    if (val instanceof Date) return val;
+    if (typeof val === 'object') return JSON.stringify(val);
+    return val;
+  };
+
   // Discover actual columns dynamically, excluding generated ones
   const wfCols = (await query<{ column_name: string; is_generated: string }>(
     `SELECT column_name, is_generated FROM information_schema.columns
@@ -573,7 +581,7 @@ async function cloneWorkflows(
       const commonCols = wfCols.filter((c) => tgtWfCols.includes(c));
       // Exclude workspace-member references that might not exist
       const safeCols = commonCols.filter((c) => wf[c] !== undefined);
-      const vals = safeCols.map((c) => wf[c]);
+      const vals = safeCols.map((c) => pgSafe(wf[c]));
       const placeholders = safeCols.map((_, i) => `$${i + 1}`).join(", ");
       const quotedCols = safeCols.map((c) => `"${c}"`).join(", ");
 
@@ -605,7 +613,7 @@ async function cloneWorkflows(
       const commonCols = wvCols.filter((c) => tgtWvCols.includes(c));
       const safeCols = commonCols.filter((c) => wv[c] !== undefined);
 
-      // Remap object IDs inside trigger and steps JSONB
+      // Remap object IDs inside trigger and steps JSONB, stringify all objects
       const vals = safeCols.map((c) => {
         let val = wv[c];
         if ((c === 'trigger' || c === 'steps') && val != null) {
@@ -613,9 +621,9 @@ async function cloneWorkflows(
           for (const [srcId, tgtId] of objectIdMap.entries()) {
             str = str.split(srcId).join(tgtId);
           }
-          val = JSON.parse(str);
+          return str;  // Already a string, ready for JSONB
         }
-        return val;
+        return pgSafe(val);
       });
 
       const placeholders = safeCols.map((_, i) => `$${i + 1}`).join(", ");
