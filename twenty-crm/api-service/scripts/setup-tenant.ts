@@ -289,7 +289,7 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
     }
   }
 
-  for (const table of tables) {
+  for (const table of validTables) {
     await insertRows(table, dataByTable[table]);
   }
 
