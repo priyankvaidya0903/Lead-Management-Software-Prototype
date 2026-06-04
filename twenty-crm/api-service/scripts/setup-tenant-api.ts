@@ -126,39 +126,37 @@ async function getCustomRelations(workspaceId: string, objectIds: string[]) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Phase 2: Generate a temporary API key for the target workspace
+//  Phase 2: Generate or use API token
 // ═══════════════════════════════════════════════════════════════════
 
-async function generateTempApiKey(workspaceId: string): Promise<string> {
-  // Dynamic import so the script only needs jsonwebtoken when actually used
-  const jwt = (await import("jsonwebtoken")).default;
+async function getApiToken(workspaceId: string): Promise<string> {
+  if (process.env.REAL_API_TOKEN) {
+    return process.env.REAL_API_TOKEN;
+  }
 
+  // Fallback to forging one (not recommended)
+  const jwt = (await import("jsonwebtoken")).default;
   if (!ACCESS_TOKEN_SECRET) {
-    throw new Error(
-      "ACCESS_TOKEN_SECRET env var is required.\n" +
-      "Get it from your Twenty .env file: grep ACCESS_TOKEN_SECRET .env",
-    );
+    throw new Error("Provide REAL_API_TOKEN or ACCESS_TOKEN_SECRET env var.");
   }
 
   const keyId = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 3600_000); // 1 hour
-
+  const expiresAt = new Date(Date.now() + 3600_000);
   await run(
     `INSERT INTO core."apiKey" (id, name, "workspaceId", "expiresAt", "createdAt", "updatedAt")
      VALUES ($1, 'setup-tenant-temp', $2, $3, NOW(), NOW())`,
     [keyId, workspaceId, expiresAt],
   );
 
-  const token = jwt.sign(
+  return jwt.sign(
     { sub: workspaceId, type: "API_KEY", workspaceId },
     ACCESS_TOKEN_SECRET,
     { expiresIn: "1h", jwtid: keyId },
   );
-
-  return token;
 }
 
 async function cleanupTempApiKey(workspaceId: string) {
+  if (process.env.REAL_API_TOKEN) return;
   await run(
     `DELETE FROM core."apiKey" WHERE name = 'setup-tenant-temp' AND "workspaceId" = $1`,
     [workspaceId],
@@ -482,7 +480,7 @@ async function main() {
 
     // ── Generate temp API key ──
     console.log("\n═══ Phase 2: Generating temporary API key ═══");
-    const token = await generateTempApiKey(targetWs.id);
+    const token = await getApiToken(targetWs.id);
     console.log("✅ Temporary API key generated");
 
     // ── Check server health ──
