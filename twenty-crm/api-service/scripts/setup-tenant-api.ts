@@ -242,6 +242,11 @@ async function introspectMutationInput(token: string, mutationName: string): Pro
     inputArg.type.ofType?.ofType?.name ||
     "unknown";
 
+  if (typeName === "unknown") {
+    console.log(`\n⚠️  [DEBUG] Introspection for ${mutationName} returned 'unknown'. Full field schema:`);
+    console.log(JSON.stringify(field, null, 2));
+  }
+
   return typeName;
 }
 
