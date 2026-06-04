@@ -150,9 +150,9 @@ async function generateTempApiKey(workspaceId: string): Promise<string> {
   );
 
   const token = jwt.sign(
-    { sub: keyId, type: "API_KEY", workspaceId },
+    { sub: workspaceId, type: "API_KEY", workspaceId },
     ACCESS_TOKEN_SECRET,
-    { expiresIn: "1h" },
+    { expiresIn: "1h", jwtid: keyId },
   );
 
   return token;
