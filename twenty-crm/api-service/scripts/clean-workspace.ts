@@ -125,76 +125,8 @@ async function main() {
     }
   }
 
-  // 3. Replace the custom application with a fresh placeholder
-  //    (workspaceCustomApplicationId is NOT NULL, so we can't set it to NULL)
-  if (ws.workspaceCustomApplicationId) {
-    const crypto = await import("node:crypto");
-    const newAppId = crypto.randomUUID();
-
-    // Check if core.application table exists before inserting
-    const appTableExists = await query<{ count: string }>(
-      `SELECT count(*) FROM information_schema.tables WHERE table_schema = 'core' AND table_name = 'application'`,
-    );
-
-    if (Number(appTableExists[0].count) > 0) {
-      // Get the column list so we only insert what exists
-      const appCols = await query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
-         WHERE table_schema = 'core' AND table_name = 'application'
-         ORDER BY ordinal_position`,
-      );
-      const colNames = appCols.map((c) => c.column_name);
-
-      // Build a minimal insert with just id + any required columns
-      const insertCols: string[] = ['"id"'];
-      const insertVals: any[] = [newAppId];
-      let idx = 2;
-
-      if (colNames.includes("workspaceId")) {
-        insertCols.push('"workspaceId"');
-        insertVals.push(ws.id);
-        idx++;
-      }
-      if (colNames.includes("createdAt")) {
-        insertCols.push('"createdAt"');
-        insertVals.push(new Date());
-        idx++;
-      }
-      if (colNames.includes("updatedAt")) {
-        insertCols.push('"updatedAt"');
-        insertVals.push(new Date());
-        idx++;
-      }
-      if (colNames.includes("position")) {
-        insertCols.push('"position"');
-        insertVals.push(0);
-        idx++;
-      }
-
-      const placeholders = insertVals.map((_, i) => `$${i + 1}`).join(", ");
-      try {
-        await run(
-          `INSERT INTO core.application (${insertCols.join(", ")}) VALUES (${placeholders})`,
-          insertVals,
-        );
-        console.log(`  ✅ Created placeholder application ${newAppId}`);
-      } catch (e) {
-        console.log(`  ⚠️  Could not create placeholder application: ${(e as Error).message}`);
-      }
-
-      // Delete the old application
-      try {
-        await run(`DELETE FROM core.application WHERE id = $1`, [ws.workspaceCustomApplicationId]);
-        console.log(`  ✅ Deleted old custom application ${ws.workspaceCustomApplicationId}`);
-      } catch (e) {
-        console.log(`  ⚠️  Could not delete old application: ${(e as Error).message}`);
-      }
-    }
-
-    // Point workspace to the new placeholder app
-    await run(`UPDATE core.workspace SET "workspaceCustomApplicationId" = $1 WHERE id = $2`, [newAppId, ws.id]);
-    console.log(`  ✅ Updated workspace to point to new application ${newAppId}`);
-  }
+  // 3. We leave core.application and workspaceCustomApplicationId intact.
+  //    The application record itself doesn't cause crashes; it's the broken object metadata.
 
   // 4. Drop custom tables from the workspace schema (tables starting with _)
   console.log("\n── Cleaning workspace schema ──");
