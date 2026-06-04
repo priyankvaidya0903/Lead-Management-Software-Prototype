@@ -77,21 +77,74 @@ async function getCustomObjects(workspaceId: string) {
   );
 }
 
+/** Get non-RELATION custom fields only — relations are handled separately via SQL */
 async function getCustomFields(workspaceId: string, objectId: string) {
   return query(
     `SELECT id, name, label, type, description, icon,
-            "defaultValue", options, settings, "isNullable", "relationTargetObjectMetadataId"
+            "defaultValue", options, "isNullable"
      FROM core."fieldMetadata"
      WHERE "workspaceId" = $1
        AND "objectMetadataId" = $2
        AND "isCustom" = true
        AND "isActive" = true
-     ORDER BY type != 'RELATION', "createdAt"`,
+       AND type != 'RELATION'
+     ORDER BY "createdAt"`,
     [workspaceId, objectId],
   );
 }
 
+/** Get user-defined RELATION pairs from the source workspace.
+ *  Excludes auto-created system relations (timelineActivities, attachments, etc.)
+ *  Returns deduplicated pairs (only one direction per relation). */
+async function getCustomRelationPairs(workspaceId: string, customObjectIds: string[]) {
+  if (customObjectIds.length === 0) return [];
 
+  const autoRelNames = [
+    'timelineActivities', 'attachments', 'noteTargets', 'taskTargets',
+    'favorites', 'activityTargets',
+  ];
+
+  // Get ALL custom RELATION fields that touch our custom objects
+  const allRelFields = await query(
+    `SELECT f.id, f.name, f.label, f.icon, f.type,
+            f.settings, f."isNullable",
+            f."objectMetadataId",
+            f."relationTargetObjectMetadataId",
+            f."relationTargetFieldMetadataId",
+            o."nameSingular" AS "objectName",
+            o."isCustom"     AS "objectIsCustom"
+     FROM core."fieldMetadata" f
+     JOIN core."objectMetadata" o ON o.id = f."objectMetadataId"
+     WHERE f."workspaceId" = $1
+       AND f.type = 'RELATION'
+       AND f."isCustom" = true
+       AND f."isActive" = true
+     ORDER BY f."createdAt"`,
+    [workspaceId],
+  );
+
+  // Build pairs: match each field with its inverse via relationTargetFieldMetadataId
+  const pairs: Array<{ from: Row; to: Row }> = [];
+  const seen = new Set<string>();
+  const customObjSet = new Set(customObjectIds);
+
+  for (const f of allRelFields) {
+    if (seen.has(f.id)) continue;
+    if (autoRelNames.includes(f.name)) continue;
+
+    // At least one side must be a custom object we're cloning
+    if (!customObjSet.has(f.objectMetadataId) && !customObjSet.has(f.relationTargetObjectMetadataId)) continue;
+
+    const inverse = allRelFields.find((r) => r.id === f.relationTargetFieldMetadataId);
+    if (inverse && !seen.has(inverse.id)) {
+      seen.add(f.id);
+      seen.add(inverse.id);
+      pairs.push({ from: f, to: inverse });
+    }
+  }
+
+  return pairs;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Phase 2: Generate or use API token
@@ -178,45 +231,28 @@ async function discoverMutations(token: string): Promise<Record<string, string>>
   return { objectMutation, fieldMutation };
 }
 
-async function introspectMutationInput(token: string, mutationName: string): Promise<string> {
-  const data = await metadataGql(token, `{
-    __type(name: "Mutation") {
-      fields(includeDeprecated: true) {
-        name
-        args {
-          name
-          type {
-            name
-            kind
-            ofType { name kind ofType { name kind } }
-          }
-        }
+/** Introspect CreateFieldInput to discover which properties it accepts */
+async function discoverFieldInputShape(token: string): Promise<Set<string>> {
+  try {
+    const data = await metadataGql(token, `{
+      __type(name: "CreateFieldInput") {
+        inputFields { name }
       }
+    }`);
+    const fieldNames = new Set<string>();
+    for (const f of (data.__type?.inputFields || [])) {
+      fieldNames.add(f.name);
     }
-  }`);
-
-  const field = data.__type.fields.find((f: any) => f.name === mutationName);
-  if (!field) return "unknown";
-
-  const inputArg = field.args.find((a: any) => a.name === "input");
-  if (!inputArg) return "unknown";
-
-  const typeName =
-    inputArg.type.name ||
-    inputArg.type.ofType?.name ||
-    inputArg.type.ofType?.ofType?.name ||
-    "unknown";
-
-  if (typeName === "unknown") {
-    console.log(`\n⚠️  [DEBUG] Introspection for ${mutationName} returned 'unknown'. Full field schema:`);
-    console.log(JSON.stringify(field, null, 2));
+    console.log(`  CreateFieldInput accepts: [${[...fieldNames].join(", ")}]`);
+    return fieldNames;
+  } catch {
+    // Fallback: assume a basic set
+    return new Set(["objectMetadataId", "name", "label", "type", "description", "icon", "isNullable", "defaultValue", "options"]);
   }
-
-  return typeName;
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Phase 4: Create objects/fields/relations via the API
+//  Phase 4: Create objects/fields via the API
 // ═══════════════════════════════════════════════════════════════════
 
 async function createObject(
@@ -224,7 +260,6 @@ async function createObject(
   mutationName: string,
   obj: Row,
 ): Promise<Row> {
-  // Try with nested "object" key first, fall back to flat input
   const objectInput = {
     nameSingular: obj.nameSingular,
     namePlural: obj.namePlural,
@@ -244,29 +279,16 @@ async function createObject(
       { input: { object: objectInput } },
     );
     return data[mutationName];
-  } catch (e1) {
-    // Attempt 2: flat { nameSingular, ... } — some Twenty versions differ
-    try {
-      const data = await metadataGql(
-        token,
-        `mutation($input: CreateOneObjectInput!) {
-          ${mutationName}(input: $input) { id nameSingular namePlural }
-        }`,
-        { input: objectInput },
-      );
-      return data[mutationName];
-    } catch (e2) {
-      // Attempt 3: discover the actual input type name via introspection
-      const inputTypeName = await introspectMutationInput(token, mutationName);
-      const data = await metadataGql(
-        token,
-        `mutation($input: ${inputTypeName}!) {
-          ${mutationName}(input: $input) { id nameSingular namePlural }
-        }`,
-        { input: { object: objectInput } },
-      );
-      return data[mutationName];
-    }
+  } catch {
+    // Attempt 2: flat input
+    const data = await metadataGql(
+      token,
+      `mutation($input: CreateOneObjectInput!) {
+        ${mutationName}(input: $input) { id nameSingular namePlural }
+      }`,
+      { input: objectInput },
+    );
+    return data[mutationName];
   }
 }
 
@@ -275,8 +297,12 @@ async function createField(
   mutationName: string,
   targetObjectId: string,
   field: Row,
+  allowedFields: Set<string>,
 ): Promise<Row> {
-  const fieldInput: any = {
+  // Build input dynamically based on what the API actually accepts
+  const fieldInput: any = {};
+
+  const propMap: Record<string, any> = {
     objectMetadataId: targetObjectId,
     name: field.name,
     label: field.label,
@@ -286,29 +312,24 @@ async function createField(
     isNullable: field.isNullable ?? true,
   };
 
-  if (field.type === 'RELATION' && field.relationTargetObjectMetadataId) {
-    // We expect objectIdMap to have populated mapping, if not, it will be undefined and fail
-    fieldInput.relationTargetObjectMetadataId = field.mappedTargetObjectId || field.relationTargetObjectMetadataId;
+  // Conditionally add SELECT/MULTI_SELECT options
+  if ((field.type === "SELECT" || field.type === "MULTI_SELECT") && field.options) {
+    propMap.options = field.options;
   }
 
-  // Handle SELECT/MULTI_SELECT options
-  if (
-    (field.type === "SELECT" || field.type === "MULTI_SELECT") &&
-    field.options
-  ) {
-    fieldInput.options = field.options;
-  }
-
-  // Handle defaultValue
+  // Conditionally add defaultValue
   if (field.defaultValue != null) {
-    fieldInput.defaultValue = field.defaultValue;
+    propMap.defaultValue = field.defaultValue;
   }
 
-  // Handle settings (e.g., currency settings)
-  if (field.settings != null) {
-    fieldInput.settings = field.settings;
+  // Only include properties that the API schema actually accepts
+  for (const [key, value] of Object.entries(propMap)) {
+    if (allowedFields.has(key)) {
+      fieldInput[key] = value;
+    }
   }
 
+  // Attempt 1: nested { field: { ... } }
   try {
     const data = await metadataGql(
       token,
@@ -318,8 +339,8 @@ async function createField(
       { input: { field: fieldInput } },
     );
     return data[mutationName];
-  } catch (e1) {
-    // Try flat input
+  } catch {
+    // Attempt 2: flat input
     const data = await metadataGql(
       token,
       `mutation($input: CreateOneFieldMetadataInput!) {
@@ -331,37 +352,303 @@ async function createField(
   }
 }
 
-
-
 // ═══════════════════════════════════════════════════════════════════
-//  Phase 5: Also look up standard (non-custom) objects in the
-//           TARGET workspace so we can create cross-references
+//  Phase 5: Clone user-defined relations via direct SQL
+//  (The GraphQL API on this Twenty version has no relation mutation)
 // ═══════════════════════════════════════════════════════════════════
 
-async function getTargetObjectByName(
-  token: string,
-  nameSingular: string,
-): Promise<string | null> {
-  try {
-    const data = await metadataGql(
-      token,
-      `{
-        objects(paging: { first: 100 }) {
-          edges {
-            node {
-              id
-              nameSingular
-            }
-          }
+async function cloneRelationsViaSql(
+  sourceWs: Row,
+  targetWs: Row,
+  objectIdMap: Map<string, string>,
+  relationPairs: Array<{ from: Row; to: Row }>,
+) {
+  // Build a full ID remap: source objectId → target objectId
+  // Also include standard (non-custom) objects by querying the target
+  const allSourceObjects = await query(
+    `SELECT id, "nameSingular" FROM core."objectMetadata" WHERE "workspaceId" = $1`,
+    [sourceWs.id],
+  );
+  const allTargetObjects = await query(
+    `SELECT id, "nameSingular" FROM core."objectMetadata" WHERE "workspaceId" = $1`,
+    [targetWs.id],
+  );
+
+  // Map source object IDs to target object IDs by nameSingular
+  const fullObjectIdMap = new Map<string, string>();
+  for (const [srcId, tgtId] of objectIdMap.entries()) {
+    fullObjectIdMap.set(srcId, tgtId);
+  }
+  for (const srcObj of allSourceObjects) {
+    if (fullObjectIdMap.has(srcObj.id)) continue;
+    const tgtObj = allTargetObjects.find((t) => t.nameSingular === srcObj.nameSingular);
+    if (tgtObj) {
+      fullObjectIdMap.set(srcObj.id, tgtObj.id);
+    }
+  }
+
+  // Get the columns of core.fieldMetadata so we can do a safe INSERT
+  const fieldMetaCols = await query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'core' AND table_name = 'fieldMetadata'
+     ORDER BY ordinal_position`,
+  );
+  const colNames = fieldMetaCols.map((c) => c.column_name);
+
+  for (const { from, to } of relationPairs) {
+    const newFromId = crypto.randomUUID();
+    const newToId = crypto.randomUUID();
+
+    const mappedFromObjectId = fullObjectIdMap.get(from.objectMetadataId);
+    const mappedFromTargetObjectId = fullObjectIdMap.get(from.relationTargetObjectMetadataId);
+    const mappedToObjectId = fullObjectIdMap.get(to.objectMetadataId);
+    const mappedToTargetObjectId = fullObjectIdMap.get(to.relationTargetObjectMetadataId);
+
+    if (!mappedFromObjectId || !mappedFromTargetObjectId || !mappedToObjectId || !mappedToTargetObjectId) {
+      console.log(`  Skipping ${from.objectName}.${from.name} (cannot map object IDs)`);
+      continue;
+    }
+
+    process.stdout.write(`  ${from.objectName}.${from.name} ↔ ${to.objectName}.${to.name}... `);
+
+    try {
+      // Check if a relation with this name already exists in the target
+      const existing = await query(
+        `SELECT id FROM core."fieldMetadata"
+         WHERE "workspaceId" = $1 AND "objectMetadataId" = $2 AND name = $3 AND type = 'RELATION'`,
+        [targetWs.id, mappedFromObjectId, from.name],
+      );
+      if (existing.length > 0) {
+        console.log("✅ (already exists)");
+        continue;
+      }
+
+      // Read full source rows
+      const [srcFrom] = await query(`SELECT * FROM core."fieldMetadata" WHERE id = $1`, [from.id]);
+      const [srcTo] = await query(`SELECT * FROM core."fieldMetadata" WHERE id = $1`, [to.id]);
+
+      if (!srcFrom || !srcTo) {
+        console.log("❌ source field not found");
+        continue;
+      }
+
+      // Build remapped rows
+      const buildInsert = (src: Row, newId: string, inverseNewId: string, objId: string, targetObjId: string) => {
+        const row: any = { ...src };
+        row.id = newId;
+        row.workspaceId = targetWs.id;
+        row.objectMetadataId = objId;
+        row.relationTargetObjectMetadataId = targetObjId;
+        row.relationTargetFieldMetadataId = inverseNewId;
+        row.createdAt = new Date();
+        row.updatedAt = new Date();
+        // Clear universalIdentifier to generate fresh
+        if ('universalIdentifier' in row) row.universalIdentifier = crypto.randomUUID();
+        return row;
+      };
+
+      const newFrom = buildInsert(srcFrom, newFromId, newToId, mappedFromObjectId, mappedFromTargetObjectId);
+      const newTo = buildInsert(srcTo, newToId, newFromId, mappedToObjectId, mappedToTargetObjectId);
+
+      // Insert both sides
+      for (const row of [newFrom, newTo]) {
+        const cols = colNames.filter((c) => c in row);
+        const vals = cols.map((c) => row[c]);
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(", ");
+        const quotedCols = cols.map((c) => `"${c}"`).join(", ");
+
+        await run(
+          `INSERT INTO core."fieldMetadata" (${quotedCols}) VALUES (${placeholders})
+           ON CONFLICT (id) DO NOTHING`,
+          vals,
+        );
+      }
+
+      // Add the join column to the workspace schema table if it's a MANY_TO_ONE
+      const fromSettings = typeof srcFrom.settings === 'string' ? JSON.parse(srcFrom.settings) : (srcFrom.settings || {});
+      const toSettings = typeof srcTo.settings === 'string' ? JSON.parse(srcTo.settings) : (srcTo.settings || {});
+
+      const tgtSchema = targetWs.databaseSchema;
+
+      // MANY_TO_ONE side has the joinColumnName
+      if (fromSettings.joinColumnName) {
+        const objName = (await query(`SELECT "nameSingular" FROM core."objectMetadata" WHERE id = $1`, [mappedFromObjectId]))[0]?.nameSingular;
+        if (objName) {
+          try {
+            await run(`ALTER TABLE "${tgtSchema}"."_${objName}" ADD COLUMN IF NOT EXISTS "${fromSettings.joinColumnName}" uuid`);
+          } catch { /* column might already exist or table name differs */ }
+          try {
+            await run(`ALTER TABLE "${tgtSchema}"."${objName}" ADD COLUMN IF NOT EXISTS "${fromSettings.joinColumnName}" uuid`);
+          } catch { /* try without underscore prefix */ }
         }
-      }`,
-    );
-    const node = data.objects.edges.find(
-      (e: any) => e.node.nameSingular === nameSingular,
-    );
-    return node ? node.node.id : null;
-  } catch {
-    return null;
+      }
+      if (toSettings.joinColumnName) {
+        const objName = (await query(`SELECT "nameSingular" FROM core."objectMetadata" WHERE id = $1`, [mappedToObjectId]))[0]?.nameSingular;
+        if (objName) {
+          try {
+            await run(`ALTER TABLE "${tgtSchema}"."_${objName}" ADD COLUMN IF NOT EXISTS "${toSettings.joinColumnName}" uuid`);
+          } catch { /* column might already exist or table name differs */ }
+          try {
+            await run(`ALTER TABLE "${tgtSchema}"."${objName}" ADD COLUMN IF NOT EXISTS "${toSettings.joinColumnName}" uuid`);
+          } catch { /* try without underscore prefix */ }
+        }
+      }
+
+      console.log("✅");
+    } catch (e: any) {
+      console.log(`❌ ${e.message}`);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Phase 6: Clone workflows via dynamic SQL
+// ═══════════════════════════════════════════════════════════════════
+
+async function cloneWorkflows(
+  sourceWs: Row,
+  targetWs: Row,
+  objectIdMap: Map<string, string>,
+) {
+  const srcSchema = sourceWs.databaseSchema;
+  const tgtSchema = targetWs.databaseSchema;
+
+  // Check if workflow table exists in source
+  const tableCheck = await query(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = $1 AND table_name = 'workflow'`,
+    [srcSchema],
+  );
+  if (tableCheck.length === 0) {
+    console.log("  No workflow table found in source schema.");
+    return;
+  }
+
+  // Discover actual columns dynamically
+  const wfCols = (await query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = 'workflow'
+     ORDER BY ordinal_position`,
+    [srcSchema],
+  )).map((c) => c.column_name);
+
+  const wvCols = (await query<{ column_name: string }>(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = $1 AND table_name = 'workflowVersion'
+     ORDER BY ordinal_position`,
+    [srcSchema],
+  )).map((c) => c.column_name);
+
+  // Clone workflows
+  const workflows = await query(`SELECT * FROM "${srcSchema}".workflow WHERE "deletedAt" IS NULL`);
+  console.log(`  Found ${workflows.length} workflow(s).`);
+
+  for (const wf of workflows) {
+    process.stdout.write(`  Workflow "${wf.name || '(unnamed)'}"... `);
+    try {
+      // Use only columns that exist in both source and target
+      const tgtWfCols = (await query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'workflow'`,
+        [tgtSchema],
+      )).map((c) => c.column_name);
+
+      const commonCols = wfCols.filter((c) => tgtWfCols.includes(c));
+      // Exclude workspace-member references that might not exist
+      const safeCols = commonCols.filter((c) => wf[c] !== undefined);
+      const vals = safeCols.map((c) => wf[c]);
+      const placeholders = safeCols.map((_, i) => `$${i + 1}`).join(", ");
+      const quotedCols = safeCols.map((c) => `"${c}"`).join(", ");
+
+      await run(
+        `INSERT INTO "${tgtSchema}".workflow (${quotedCols}) VALUES (${placeholders})
+         ON CONFLICT (id) DO NOTHING`,
+        vals,
+      );
+      console.log("✅");
+    } catch (e: any) {
+      console.log(`❌ ${e.message}`);
+    }
+  }
+
+  // Clone workflow versions
+  const workflowVersions = await query(`SELECT * FROM "${srcSchema}"."workflowVersion" WHERE "deletedAt" IS NULL`);
+  console.log(`  Found ${workflowVersions.length} workflow version(s).`);
+
+  for (const wv of workflowVersions) {
+    process.stdout.write(`  Version "${wv.name || '(unnamed)'}"... `);
+    try {
+      const tgtWvCols = (await query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'workflowVersion'`,
+        [tgtSchema],
+      )).map((c) => c.column_name);
+
+      const commonCols = wvCols.filter((c) => tgtWvCols.includes(c));
+      const safeCols = commonCols.filter((c) => wv[c] !== undefined);
+
+      // Remap object IDs inside trigger and steps JSONB
+      const vals = safeCols.map((c) => {
+        let val = wv[c];
+        if ((c === 'trigger' || c === 'steps') && val != null) {
+          let str = JSON.stringify(val);
+          for (const [srcId, tgtId] of objectIdMap.entries()) {
+            str = str.split(srcId).join(tgtId);
+          }
+          val = JSON.parse(str);
+        }
+        return val;
+      });
+
+      const placeholders = safeCols.map((_, i) => `$${i + 1}`).join(", ");
+      const quotedCols = safeCols.map((c) => `"${c}"`).join(", ");
+
+      await run(
+        `INSERT INTO "${tgtSchema}"."workflowVersion" (${quotedCols}) VALUES (${placeholders})
+         ON CONFLICT (id) DO NOTHING`,
+        vals,
+      );
+      console.log("✅");
+    } catch (e: any) {
+      console.log(`❌ ${e.message}`);
+    }
+  }
+
+  // Clone workflowAutomatedTrigger if it exists
+  const triggerTableCheck = await query(
+    `SELECT table_name FROM information_schema.tables
+     WHERE table_schema = $1 AND table_name = 'workflowAutomatedTrigger'`,
+    [srcSchema],
+  );
+  if (triggerTableCheck.length > 0) {
+    const triggers = await query(`SELECT * FROM "${srcSchema}"."workflowAutomatedTrigger" WHERE "deletedAt" IS NULL`);
+    if (triggers.length > 0) {
+      console.log(`  Found ${triggers.length} automated trigger(s).`);
+      const srcTrigCols = (await query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'workflowAutomatedTrigger'`,
+        [srcSchema],
+      )).map((c) => c.column_name);
+      const tgtTrigCols = (await query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns
+         WHERE table_schema = $1 AND table_name = 'workflowAutomatedTrigger'`,
+        [tgtSchema],
+      )).map((c) => c.column_name);
+
+      for (const trig of triggers) {
+        try {
+          const commonCols = srcTrigCols.filter((c) => tgtTrigCols.includes(c) && trig[c] !== undefined);
+          const vals = commonCols.map((c) => trig[c]);
+          const placeholders = commonCols.map((_, i) => `$${i + 1}`).join(", ");
+          const quotedCols = commonCols.map((c) => `"${c}"`).join(", ");
+          await run(
+            `INSERT INTO "${tgtSchema}"."workflowAutomatedTrigger" (${quotedCols}) VALUES (${placeholders})
+             ON CONFLICT (id) DO NOTHING`,
+            vals,
+          );
+        } catch { /* skip */ }
+      }
+    }
   }
 }
 
@@ -400,8 +687,15 @@ async function main() {
     for (const obj of sourceObjects) {
       const fields = await getCustomFields(sourceWs.id, obj.id);
       sourceFieldsByObject[obj.id] = fields;
-      console.log(`  ${obj.labelSingular}: ${fields.length} custom field(s) — [${fields.map((f: Row) => f.name).join(", ")}]`);
+      console.log(`  ${obj.labelSingular}: ${fields.length} non-relation field(s) — [${fields.map((f: Row) => f.name).join(", ")}]`);
     }
+
+    // Read custom relation pairs
+    const customRelPairs = await getCustomRelationPairs(
+      sourceWs.id,
+      sourceObjects.map((o: Row) => o.id),
+    );
+    console.log(`Found ${customRelPairs.length} user-defined relation pair(s)`);
 
     // ── Generate temp API key ──
     console.log("\n═══ Phase 2: Generating temporary API key ═══");
@@ -430,9 +724,10 @@ async function main() {
       throw new Error(`Server at ${SERVER_URL} is not reachable. Is it running?`);
     }
 
-    // ── Discover mutation names ──
+    // ── Discover mutation names + field input shape ──
     console.log("\n═══ Phase 4: Introspecting Metadata API ═══");
     const mutations = await discoverMutations(token);
+    const allowedFieldProps = await discoverFieldInputShape(token);
 
     // ── Create custom objects ──
     console.log("\n═══ Phase 5: Creating custom objects ═══");
@@ -449,7 +744,7 @@ async function main() {
       }
     }
 
-    // ── Create custom fields ──
+    // ── Create custom fields (non-relation only) ──
     console.log("\n═══ Phase 6: Creating custom fields ═══");
     for (const obj of sourceObjects) {
       const targetObjectId = objectIdMap.get(obj.id);
@@ -460,15 +755,9 @@ async function main() {
 
       const fields = sourceFieldsByObject[obj.id] || [];
       for (const field of fields) {
-        if (field.type === 'RELATION') {
-           field.mappedTargetObjectId = objectIdMap.get(field.relationTargetObjectMetadataId);
-           if (!field.mappedTargetObjectId) {
-             field.mappedTargetObjectId = (await getTargetObjectByName(token, "WorkspaceMember")) || field.relationTargetObjectMetadataId;
-           }
-        }
         try {
           process.stdout.write(`  ${obj.labelSingular}.${field.name}... `);
-          await createField(token, mutations.fieldMutation, targetObjectId, field);
+          await createField(token, mutations.fieldMutation, targetObjectId, field, allowedFieldProps);
           console.log("✅");
         } catch (e: any) {
           console.log(`❌ ${e.message}`);
@@ -476,47 +765,24 @@ async function main() {
       }
     }
 
+    // ── Clone user-defined relations via SQL ──
+    console.log("\n═══ Phase 7: Cloning user-defined relations via SQL ═══");
+    if (customRelPairs.length > 0) {
+      await cloneRelationsViaSql(sourceWs, targetWs, objectIdMap, customRelPairs);
+    } else {
+      console.log("  No user-defined relations to clone.");
+    }
+
     // ── Workflows ──
-    console.log("\n═══ Phase 7: Cloning Internal Workflows ═══");
+    console.log("\n═══ Phase 8: Cloning Internal Workflows ═══");
     try {
-      const srcSchema = sourceWs.databaseSchema;
-      const tgtSchema = targetWs.databaseSchema;
-      
-      const workflows = await query(`SELECT * FROM ${srcSchema}.workflow`);
-      const workflowVersions = await query(`SELECT * FROM ${srcSchema}."workflowVersion"`);
-      
-      console.log(`  Found ${workflows.length} workflow(s) and ${workflowVersions.length} version(s).`);
-
-      for (const wf of workflows) {
-        process.stdout.write(`  Workflow "${wf.name}"... `);
-        await run(`INSERT INTO ${tgtSchema}.workflow (id, "createdAt", "updatedAt", name, statuses, "workspaceMemberId") 
-                   VALUES ($1, NOW(), NOW(), $2, $3, NULL) ON CONFLICT DO NOTHING`, 
-                   [wf.id, wf.name, wf.statuses]);
-        console.log("✅");
-      }
-
-      for (const wv of workflowVersions) {
-        process.stdout.write(`  Workflow Version "${wv.name}"... `);
-        
-        let triggerStr = JSON.stringify(wv.trigger || {});
-        let stepsStr = JSON.stringify(wv.steps || []);
-        
-        for (const [srcId, tgtId] of objectIdMap.entries()) {
-          triggerStr = triggerStr.split(srcId).join(tgtId);
-          stepsStr = stepsStr.split(srcId).join(tgtId);
-        }
-
-        await run(`INSERT INTO ${tgtSchema}."workflowVersion" (id, "createdAt", "updatedAt", name, trigger, steps, status, "workflowId") 
-                   VALUES ($1, NOW(), NOW(), $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
-                   [wv.id, wv.name, triggerStr, stepsStr, wv.status, wv.workflowId]);
-        console.log("✅");
-      }
+      await cloneWorkflows(sourceWs, targetWs, objectIdMap);
     } catch (e: any) {
       console.log(`  ⚠️ Failed to clone workflows: ${e.message}`);
     }
 
     // ── Clone Webhooks ──
-    console.log("\n═══ Phase 8: Cloning Webhooks ═══");
+    console.log("\n═══ Phase 9: Cloning Webhooks ═══");
     const sourceWebhooks = await query(`SELECT * FROM core.webhook WHERE "workspaceId" = $1`, [sourceWs.id]);
     for (const hw of sourceWebhooks) {
       try {
@@ -534,14 +800,13 @@ async function main() {
     }
 
     // ── Setup Visibility (Navigation Menu Items) ──
-    console.log("\n═══ Phase 9: Creating Navigation Sidebar Items ═══");
+    console.log("\n═══ Phase 10: Creating Navigation Sidebar Items ═══");
     for (const obj of sourceObjects) {
       const targetObjectId = objectIdMap.get(obj.id);
       if (!targetObjectId) continue;
       
       try {
         process.stdout.write(`  Sidebar link for "${obj.labelPlural}"... `);
-        // Only insert if it doesn't already exist for this object in the target workspace
         const existing = await query(`SELECT id FROM core."navigationMenuItem" WHERE "workspaceId" = $1 AND "targetObjectMetadataId" = $2`, [targetWs.id, targetObjectId]);
         
         if (existing.length === 0) {
@@ -561,7 +826,7 @@ async function main() {
     }
 
     // ── Cleanup ──
-    console.log("\n═══ Phase 10: Cleanup ═══");
+    console.log("\n═══ Phase 11: Cleanup ═══");
     await cleanupTempApiKey(targetWs.id);
     console.log("✅ Temporary API key removed");
 
