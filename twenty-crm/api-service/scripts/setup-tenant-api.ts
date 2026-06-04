@@ -97,25 +97,33 @@ async function getCustomRelations(workspaceId: string, objectIds: string[]) {
   // Build a parameterized IN clause
   const placeholders = objectIds.map((_, i) => `$${i + 2}`).join(", ");
   return query(
-    `SELECT rm.id, rm."relationType",
-            rm."fromObjectMetadataId", rm."toObjectMetadataId",
-            ff.name  AS "fromFieldName",  ff.label  AS "fromFieldLabel",  ff.icon AS "fromIcon",
-            tf.name  AS "toFieldName",    tf.label  AS "toFieldLabel",    tf.icon AS "toIcon",
-            fo."nameSingular" AS "fromObjectName",
-            tobj."nameSingular" AS "toObjectName",
-            tobj."isCustom" AS "toObjectIsCustom",
-            fo."isCustom" AS "fromObjectIsCustom"
-     FROM core."relationMetadata" rm
-     JOIN core."fieldMetadata" ff   ON ff.id   = rm."fromFieldMetadataId"
-     JOIN core."fieldMetadata" tf   ON tf.id   = rm."toFieldMetadataId"
-     JOIN core."objectMetadata" fo  ON fo.id   = rm."fromObjectMetadataId"
-     JOIN core."objectMetadata" tobj ON tobj.id = rm."toObjectMetadataId"
-     WHERE rm."workspaceId" = $1
-       AND (rm."fromObjectMetadataId" IN (${placeholders})
-            OR rm."toObjectMetadataId" IN (${placeholders}))
-     ORDER BY rm."createdAt"`,
-    [workspaceId, ...objectIds],
-  );
+  try {
+    return await query(
+      `SELECT rm.id, rm."relationType",
+              rm."fromObjectMetadataId", rm."toObjectMetadataId",
+              ff.name  AS "fromFieldName",  ff.label  AS "fromFieldLabel",  ff.icon AS "fromIcon",
+              tf.name  AS "toFieldName",    tf.label  AS "toFieldLabel",    tf.icon AS "toIcon",
+              fo."nameSingular" AS "fromObjectName",
+              tobj."nameSingular" AS "toObjectName",
+              tobj."isCustom" AS "toObjectIsCustom",
+              fo."isCustom" AS "fromObjectIsCustom"
+       FROM core."relation" rm
+       JOIN core."fieldMetadata" ff   ON ff.id   = rm."fromFieldMetadataId"
+       JOIN core."fieldMetadata" tf   ON tf.id   = rm."toFieldMetadataId"
+       JOIN core."objectMetadata" fo  ON fo.id   = rm."fromObjectMetadataId"
+       JOIN core."objectMetadata" tobj ON tobj.id = rm."toObjectMetadataId"
+       WHERE rm."workspaceId" = $1
+         AND (rm."fromObjectMetadataId" IN (${placeholders})
+              OR rm."toObjectMetadataId" IN (${placeholders}))
+       ORDER BY rm."createdAt"`,
+      [workspaceId, ...objectIds],
+    );
+  } catch (e: any) {
+    if (e.message.includes('relation "core.relation" does not exist')) {
+      return [];
+    }
+    throw e;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
