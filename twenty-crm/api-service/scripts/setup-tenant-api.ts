@@ -80,50 +80,18 @@ async function getCustomObjects(workspaceId: string) {
 async function getCustomFields(workspaceId: string, objectId: string) {
   return query(
     `SELECT id, name, label, type, description, icon,
-            "defaultValue", options, settings, "isNullable"
+            "defaultValue", options, settings, "isNullable", "relationTargetObjectMetadataId"
      FROM core."fieldMetadata"
      WHERE "workspaceId" = $1
        AND "objectMetadataId" = $2
        AND "isCustom" = true
        AND "isActive" = true
-       AND type != 'RELATION'
-     ORDER BY "createdAt"`,
+     ORDER BY type != 'RELATION', "createdAt"`,
     [workspaceId, objectId],
   );
 }
 
-async function getCustomRelations(workspaceId: string, objectIds: string[]) {
-  if (objectIds.length === 0) return [];
-  // Build a parameterized IN clause
-  const placeholders = objectIds.map((_, i) => `$${i + 2}`).join(", ");
-  try {
-    return await query(
-      `SELECT f1.id,
-              f1.settings->>'relationType' AS "relationType",
-              f1."objectMetadataId" AS "fromObjectMetadataId",
-              f1."relationTargetObjectMetadataId" AS "toObjectMetadataId",
-              f1.name AS "fromFieldName", f1.label AS "fromFieldLabel", f1.icon AS "fromIcon",
-              f2.name AS "toFieldName", f2.label AS "toFieldLabel", f2.icon AS "toIcon",
-              fo1."nameSingular" AS "fromObjectName",
-              fo1."isCustom" AS "fromObjectIsCustom",
-              fo2."nameSingular" AS "toObjectName",
-              fo2."isCustom" AS "toObjectIsCustom"
-       FROM core."fieldMetadata" f1
-       JOIN core."fieldMetadata" f2 ON f2.id = f1."relationTargetFieldMetadataId"
-       JOIN core."objectMetadata" fo1 ON fo1.id = f1."objectMetadataId"
-       JOIN core."objectMetadata" fo2 ON fo2.id = f1."relationTargetObjectMetadataId"
-       WHERE f1."workspaceId" = $1
-         AND f1.type = 'RELATION'
-         AND f1.id < f2.id
-         AND (f1."objectMetadataId" IN (${placeholders}) OR f1."relationTargetObjectMetadataId" IN (${placeholders}))
-       ORDER BY f1."createdAt"`,
-      [workspaceId, ...objectIds],
-    );
-  } catch (e: any) {
-    console.error("Relation query failed:", e.message);
-    return [];
-  }
-}
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  Phase 2: Generate or use API token
@@ -201,16 +169,13 @@ async function discoverMutations(token: string): Promise<Record<string, string>>
 
   const fields: string[] = data.__schema.mutationType.fields.map((f: any) => f.name);
 
-  // Find the object creation mutation
   const objectMutation =
     fields.find((n) => /createOneObject/i.test(n)) || "createOneObjectMetadataItem";
   const fieldMutation =
     fields.find((n) => /createOneField/i.test(n)) || "createOneFieldMetadataItem";
-  const relationMutation =
-    fields.find((n) => /createOneRelation/i.test(n)) || "createOneRelationMetadataItem";
 
-  console.log(`  Discovered mutations: object=${objectMutation}, field=${fieldMutation}, relation=${relationMutation}`);
-  return { objectMutation, fieldMutation, relationMutation };
+  console.log(`  Discovered mutations: object=${objectMutation}, field=${fieldMutation}`);
+  return { objectMutation, fieldMutation };
 }
 
 async function introspectMutationInput(token: string, mutationName: string): Promise<string> {
@@ -321,6 +286,11 @@ async function createField(
     isNullable: field.isNullable ?? true,
   };
 
+  if (field.type === 'RELATION' && field.relationTargetObjectMetadataId) {
+    // We expect objectIdMap to have populated mapping, if not, it will be undefined and fail
+    fieldInput.relationTargetObjectMetadataId = field.mappedTargetObjectId || field.relationTargetObjectMetadataId;
+  }
+
   // Handle SELECT/MULTI_SELECT options
   if (
     (field.type === "SELECT" || field.type === "MULTI_SELECT") &&
@@ -361,53 +331,7 @@ async function createField(
   }
 }
 
-async function createRelation(
-  token: string,
-  mutationName: string,
-  fromObjectId: string,
-  toObjectId: string,
-  rel: Row,
-): Promise<Row | null> {
-  const relationInput = {
-    relationType: rel.relationType,
-    fromObjectMetadataId: fromObjectId,
-    toObjectMetadataId: toObjectId,
-    fromName: rel.fromFieldName,
-    fromLabel: rel.fromFieldLabel,
-    fromIcon: rel.fromIcon || "IconBox",
-    toName: rel.toFieldName,
-    toLabel: rel.toFieldLabel,
-    toIcon: rel.toIcon || "IconBox",
-  };
 
-  const inputTypeName = await introspectMutationInput(token, mutationName);
-
-  try {
-    const data = await metadataGql(
-      token,
-      `mutation($input: ${inputTypeName}!) {
-        ${mutationName}(input: $input) { id }
-      }`,
-      { input: { relation: relationInput } },
-    );
-    return data[mutationName];
-  } catch (e1) {
-    // Try flat input
-    try {
-      const data = await metadataGql(
-        token,
-        `mutation($input: ${inputTypeName}!) {
-          ${mutationName}(input: $input) { id }
-        }`,
-        { input: relationInput },
-      );
-      return data[mutationName];
-    } catch (e2) {
-      console.error(`    ⚠️  Relation creation failed: ${(e2 as Error).message}`);
-      return null;
-    }
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════════
 //  Phase 5: Also look up standard (non-custom) objects in the
@@ -479,12 +403,6 @@ async function main() {
       console.log(`  ${obj.labelSingular}: ${fields.length} custom field(s) — [${fields.map((f: Row) => f.name).join(", ")}]`);
     }
 
-    const sourceRelations = await getCustomRelations(
-      sourceWs.id,
-      sourceObjects.map((o: Row) => o.id),
-    );
-    console.log(`Found ${sourceRelations.length} relation(s)`);
-
     // ── Generate temp API key ──
     console.log("\n═══ Phase 2: Generating temporary API key ═══");
     const token = await getApiToken(targetWs.id);
@@ -542,6 +460,12 @@ async function main() {
 
       const fields = sourceFieldsByObject[obj.id] || [];
       for (const field of fields) {
+        if (field.type === 'RELATION') {
+           field.mappedTargetObjectId = objectIdMap.get(field.relationTargetObjectMetadataId);
+           if (!field.mappedTargetObjectId) {
+             field.mappedTargetObjectId = (await getTargetObjectByName(token, "WorkspaceMember")) || field.relationTargetObjectMetadataId;
+           }
+        }
         try {
           process.stdout.write(`  ${obj.labelSingular}.${field.name}... `);
           await createField(token, mutations.fieldMutation, targetObjectId, field);
@@ -552,32 +476,43 @@ async function main() {
       }
     }
 
-    // ── Create relations ──
-    console.log("\n═══ Phase 7: Creating relations ═══");
-    for (const rel of sourceRelations) {
-      let fromId = objectIdMap.get(rel.fromObjectMetadataId);
-      let toId = objectIdMap.get(rel.toObjectMetadataId);
+    // ── Workflows ──
+    console.log("\n═══ Phase 7: Cloning Internal Workflows ═══");
+    try {
+      const srcSchema = sourceWs.databaseSchema;
+      const tgtSchema = targetWs.databaseSchema;
+      
+      const workflows = await query(`SELECT * FROM ${srcSchema}.workflow`);
+      const workflowVersions = await query(`SELECT * FROM ${srcSchema}."workflowVersion"`);
+      
+      console.log(`  Found ${workflows.length} workflow(s) and ${workflowVersions.length} version(s).`);
 
-      // If one side is a standard object (not custom), look it up in the target
-      if (!fromId && !rel.fromObjectIsCustom) {
-        fromId = (await getTargetObjectByName(token, rel.fromObjectName)) || undefined;
-      }
-      if (!toId && !rel.toObjectIsCustom) {
-        toId = (await getTargetObjectByName(token, rel.toObjectName)) || undefined;
-      }
-
-      if (!fromId || !toId) {
-        console.log(`  Skipping relation ${rel.fromObjectName}.${rel.fromFieldName} → ${rel.toObjectName} (missing object mapping)`);
-        continue;
-      }
-
-      try {
-        process.stdout.write(`  ${rel.fromObjectName}.${rel.fromFieldName} → ${rel.toObjectName}... `);
-        await createRelation(token, mutations.relationMutation, fromId, toId, rel);
+      for (const wf of workflows) {
+        process.stdout.write(`  Workflow "${wf.name}"... `);
+        await run(`INSERT INTO ${tgtSchema}.workflow (id, "createdAt", "updatedAt", name, statuses, "workspaceMemberId") 
+                   VALUES ($1, NOW(), NOW(), $2, $3, NULL) ON CONFLICT DO NOTHING`, 
+                   [wf.id, wf.name, wf.statuses]);
         console.log("✅");
-      } catch (e: any) {
-        console.log(`❌ ${e.message}`);
       }
+
+      for (const wv of workflowVersions) {
+        process.stdout.write(`  Workflow Version "${wv.name}"... `);
+        
+        let triggerStr = JSON.stringify(wv.trigger || {});
+        let stepsStr = JSON.stringify(wv.steps || []);
+        
+        for (const [srcId, tgtId] of objectIdMap.entries()) {
+          triggerStr = triggerStr.split(srcId).join(tgtId);
+          stepsStr = stepsStr.split(srcId).join(tgtId);
+        }
+
+        await run(`INSERT INTO ${tgtSchema}."workflowVersion" (id, "createdAt", "updatedAt", name, trigger, steps, status, "workflowId") 
+                   VALUES ($1, NOW(), NOW(), $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+                   [wv.id, wv.name, triggerStr, stepsStr, wv.status, wv.workflowId]);
+        console.log("✅");
+      }
+    } catch (e: any) {
+      console.log(`  ⚠️ Failed to clone workflows: ${e.message}`);
     }
 
     // ── Clone Webhooks ──
