@@ -388,12 +388,18 @@ async function cloneRelationsViaSql(
   }
 
   // Get the columns of core.fieldMetadata so we can do a safe INSERT
-  const fieldMetaCols = await query<{ column_name: string }>(
-    `SELECT column_name FROM information_schema.columns
+  const fieldMetaCols = await query<{ column_name: string; is_generated: string }>(
+    `SELECT column_name, is_generated FROM information_schema.columns
      WHERE table_schema = 'core' AND table_name = 'fieldMetadata'
      ORDER BY ordinal_position`,
   );
-  const colNames = fieldMetaCols.map((c) => c.column_name);
+  // Exclude generated columns
+  const colNames = fieldMetaCols
+    .filter((c) => c.is_generated !== 'ALWAYS')
+    .map((c) => c.column_name);
+
+  // Columns that reference workspace members (may not exist in target)
+  const nullableRefCols = ['createdByWorkspaceMemberId', 'updatedByWorkspaceMemberId'];
 
   for (const { from, to } of relationPairs) {
     const newFromId = crypto.randomUUID();
@@ -432,25 +438,28 @@ async function cloneRelationsViaSql(
         continue;
       }
 
-      // Build remapped rows
-      const buildInsert = (src: Row, newId: string, inverseNewId: string, objId: string, targetObjId: string) => {
+      // Build remapped row — initially set cross-reference to NULL to avoid FK violation
+      const buildRow = (src: Row, newId: string, objId: string, targetObjId: string) => {
         const row: any = { ...src };
         row.id = newId;
         row.workspaceId = targetWs.id;
         row.objectMetadataId = objId;
         row.relationTargetObjectMetadataId = targetObjId;
-        row.relationTargetFieldMetadataId = inverseNewId;
+        row.relationTargetFieldMetadataId = null;  // Set to NULL first!
         row.createdAt = new Date();
         row.updatedAt = new Date();
-        // Clear universalIdentifier to generate fresh
         if ('universalIdentifier' in row) row.universalIdentifier = crypto.randomUUID();
+        // Null out workspace member references that won't exist in target
+        for (const col of nullableRefCols) {
+          if (col in row) row[col] = null;
+        }
         return row;
       };
 
-      const newFrom = buildInsert(srcFrom, newFromId, newToId, mappedFromObjectId, mappedFromTargetObjectId);
-      const newTo = buildInsert(srcTo, newToId, newFromId, mappedToObjectId, mappedToTargetObjectId);
+      const newFrom = buildRow(srcFrom, newFromId, mappedFromObjectId, mappedFromTargetObjectId);
+      const newTo = buildRow(srcTo, newToId, mappedToObjectId, mappedToTargetObjectId);
 
-      // Insert both sides
+      // PASS 1: Insert both sides with NULL cross-references
       for (const row of [newFrom, newTo]) {
         const cols = colNames.filter((c) => c in row);
         const vals = cols.map((c) => row[c]);
@@ -464,6 +473,16 @@ async function cloneRelationsViaSql(
         );
       }
 
+      // PASS 2: Now UPDATE both to set the cross-references
+      await run(
+        `UPDATE core."fieldMetadata" SET "relationTargetFieldMetadataId" = $1 WHERE id = $2`,
+        [newToId, newFromId],
+      );
+      await run(
+        `UPDATE core."fieldMetadata" SET "relationTargetFieldMetadataId" = $1 WHERE id = $2`,
+        [newFromId, newToId],
+      );
+
       // Add the join column to the workspace schema table if it's a MANY_TO_ONE
       const fromSettings = typeof srcFrom.settings === 'string' ? JSON.parse(srcFrom.settings) : (srcFrom.settings || {});
       const toSettings = typeof srcTo.settings === 'string' ? JSON.parse(srcTo.settings) : (srcTo.settings || {});
@@ -471,26 +490,18 @@ async function cloneRelationsViaSql(
       const tgtSchema = targetWs.databaseSchema;
 
       // MANY_TO_ONE side has the joinColumnName
-      if (fromSettings.joinColumnName) {
-        const objName = (await query(`SELECT "nameSingular" FROM core."objectMetadata" WHERE id = $1`, [mappedFromObjectId]))[0]?.nameSingular;
-        if (objName) {
-          try {
-            await run(`ALTER TABLE "${tgtSchema}"."_${objName}" ADD COLUMN IF NOT EXISTS "${fromSettings.joinColumnName}" uuid`);
-          } catch { /* column might already exist or table name differs */ }
-          try {
-            await run(`ALTER TABLE "${tgtSchema}"."${objName}" ADD COLUMN IF NOT EXISTS "${fromSettings.joinColumnName}" uuid`);
-          } catch { /* try without underscore prefix */ }
-        }
-      }
-      if (toSettings.joinColumnName) {
-        const objName = (await query(`SELECT "nameSingular" FROM core."objectMetadata" WHERE id = $1`, [mappedToObjectId]))[0]?.nameSingular;
-        if (objName) {
-          try {
-            await run(`ALTER TABLE "${tgtSchema}"."_${objName}" ADD COLUMN IF NOT EXISTS "${toSettings.joinColumnName}" uuid`);
-          } catch { /* column might already exist or table name differs */ }
-          try {
-            await run(`ALTER TABLE "${tgtSchema}"."${objName}" ADD COLUMN IF NOT EXISTS "${toSettings.joinColumnName}" uuid`);
-          } catch { /* try without underscore prefix */ }
+      for (const [settings, objId] of [[fromSettings, mappedFromObjectId], [toSettings, mappedToObjectId]] as [any, string][]) {
+        if (settings.joinColumnName) {
+          const objName = (await query(`SELECT "nameSingular" FROM core."objectMetadata" WHERE id = $1`, [objId]))[0]?.nameSingular;
+          if (objName) {
+            // Try with underscore prefix (custom objects) and without (standard objects)
+            for (const prefix of ['_', '']) {
+              try {
+                await run(`ALTER TABLE "${tgtSchema}"."${prefix}${objName}" ADD COLUMN IF NOT EXISTS "${settings.joinColumnName}" uuid`);
+                break; // success, stop trying
+              } catch { /* try next prefix */ }
+            }
+          }
         }
       }
 
@@ -524,20 +535,25 @@ async function cloneWorkflows(
     return;
   }
 
-  // Discover actual columns dynamically
-  const wfCols = (await query<{ column_name: string }>(
-    `SELECT column_name FROM information_schema.columns
+  // Columns to ALWAYS exclude from INSERT (generated/computed columns)
+  const excludeCols = new Set(['searchVector']);
+
+  // Discover actual columns dynamically, excluding generated ones
+  const wfCols = (await query<{ column_name: string; is_generated: string }>(
+    `SELECT column_name, is_generated FROM information_schema.columns
      WHERE table_schema = $1 AND table_name = 'workflow'
      ORDER BY ordinal_position`,
     [srcSchema],
-  )).map((c) => c.column_name);
+  )).filter((c) => c.is_generated !== 'ALWAYS' && !excludeCols.has(c.column_name))
+    .map((c) => c.column_name);
 
-  const wvCols = (await query<{ column_name: string }>(
-    `SELECT column_name FROM information_schema.columns
+  const wvCols = (await query<{ column_name: string; is_generated: string }>(
+    `SELECT column_name, is_generated FROM information_schema.columns
      WHERE table_schema = $1 AND table_name = 'workflowVersion'
      ORDER BY ordinal_position`,
     [srcSchema],
-  )).map((c) => c.column_name);
+  )).filter((c) => c.is_generated !== 'ALWAYS' && !excludeCols.has(c.column_name))
+    .map((c) => c.column_name);
 
   // Clone workflows
   const workflows = await query(`SELECT * FROM "${srcSchema}".workflow WHERE "deletedAt" IS NULL`);
@@ -547,11 +563,12 @@ async function cloneWorkflows(
     process.stdout.write(`  Workflow "${wf.name || '(unnamed)'}"... `);
     try {
       // Use only columns that exist in both source and target
-      const tgtWfCols = (await query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
+      const tgtWfCols = (await query<{ column_name: string; is_generated: string }>(
+        `SELECT column_name, is_generated FROM information_schema.columns
          WHERE table_schema = $1 AND table_name = 'workflow'`,
         [tgtSchema],
-      )).map((c) => c.column_name);
+      )).filter((c) => c.is_generated !== 'ALWAYS' && !excludeCols.has(c.column_name))
+        .map((c) => c.column_name);
 
       const commonCols = wfCols.filter((c) => tgtWfCols.includes(c));
       // Exclude workspace-member references that might not exist
@@ -578,11 +595,12 @@ async function cloneWorkflows(
   for (const wv of workflowVersions) {
     process.stdout.write(`  Version "${wv.name || '(unnamed)'}"... `);
     try {
-      const tgtWvCols = (await query<{ column_name: string }>(
-        `SELECT column_name FROM information_schema.columns
+      const tgtWvCols = (await query<{ column_name: string; is_generated: string }>(
+        `SELECT column_name, is_generated FROM information_schema.columns
          WHERE table_schema = $1 AND table_name = 'workflowVersion'`,
         [tgtSchema],
-      )).map((c) => c.column_name);
+      )).filter((c) => c.is_generated !== 'ALWAYS' && !excludeCols.has(c.column_name))
+        .map((c) => c.column_name);
 
       const commonCols = wvCols.filter((c) => tgtWvCols.includes(c));
       const safeCols = commonCols.filter((c) => wv[c] !== undefined);
