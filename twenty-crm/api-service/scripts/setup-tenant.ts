@@ -129,7 +129,7 @@ async function recreateTargetSchemaFromSource(sourceSchema: string, targetSchema
   }
 }
 
-async function deleteTargetCoreData(targetWorkspaceId: string) {
+async function deleteTargetCoreData(targetWorkspaceId: string, customAppId: string | null) {
   const tables = [
     'core."viewSort"',
     'core."viewGroup"',
@@ -172,8 +172,8 @@ async function deleteTargetCoreData(targetWorkspaceId: string) {
 
   for (const table of validTables) {
     await run(`DELETE FROM ${table} WHERE "workspaceId" = $1`, [targetWorkspaceId]);
-    if (table === 'core.application' && targetWorkspace.workspaceCustomApplicationId) {
-      await run(`DELETE FROM ${table} WHERE id = $1`, [targetWorkspace.workspaceCustomApplicationId]);
+    if (table === 'core.application' && customAppId) {
+      await run(`DELETE FROM ${table} WHERE id = $1`, [customAppId]);
     }
   }
 }
@@ -220,7 +220,7 @@ async function insertRows(table: string, data: Row[]) {
   }
 }
 
-async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspaceId: string) {
+async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspaceId: string, customAppId: string | null) {
   const tables = [
     'core.application',
     'core."applicationVariable"',
@@ -266,8 +266,8 @@ async function cloneCoreWorkspaceData(sourceWorkspaceId: string, targetWorkspace
   for (const table of validTables) {
     const tableRows = await fetchWorkspaceRows(table, sourceWorkspaceId);
     
-    if (table === 'core.application' && sourceWorkspace.workspaceCustomApplicationId) {
-      const customApp = await rows(`SELECT * FROM ${table} WHERE id = $1`, [sourceWorkspace.workspaceCustomApplicationId]);
+    if (table === 'core.application' && customAppId) {
+      const customApp = await rows(`SELECT * FROM ${table} WHERE id = $1`, [customAppId]);
       if (customApp.length > 0 && !tableRows.some((r: any) => r.id === customApp[0].id)) {
         tableRows.push(customApp[0]);
       }
@@ -366,9 +366,9 @@ async function main() {
   // BACKUP roleTarget from target before wiping
   const targetRoleTargets = await rows(`SELECT * FROM core."roleTarget" WHERE "workspaceId" = $1`, [targetWorkspace.id]);
 
-  await deleteTargetCoreData(targetWorkspace.id);
+  await deleteTargetCoreData(targetWorkspace.id, targetWorkspace.workspaceCustomApplicationId);
   await recreateTargetSchemaFromSource(sourceWorkspace.databaseSchema, targetWorkspace.databaseSchema);
-  const idMap = await cloneCoreWorkspaceData(sourceWorkspace.id, targetWorkspace.id);
+  const idMap = await cloneCoreWorkspaceData(sourceWorkspace.id, targetWorkspace.id, sourceWorkspace.workspaceCustomApplicationId);
   await remapSchemaUuids(targetWorkspace.databaseSchema, idMap);
 
   // Restore Default Role and Custom App
