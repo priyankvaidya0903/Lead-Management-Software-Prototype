@@ -398,8 +398,12 @@ async function cloneRelationsViaSql(
     .filter((c) => c.is_generated !== 'ALWAYS')
     .map((c) => c.column_name);
 
-  // Columns that reference workspace members (may not exist in target)
-  const nullableRefCols = ['createdByWorkspaceMemberId', 'updatedByWorkspaceMemberId'];
+  // Columns that reference entities from the source workspace (may not exist in target)
+  const nullableRefCols = [
+    'createdByWorkspaceMemberId',
+    'updatedByWorkspaceMemberId',
+    'applicationId',              // source app doesn't exist in target → crashes cache builder
+  ];
 
   for (const { from, to } of relationPairs) {
     const newFromId = crypto.randomUUID();
