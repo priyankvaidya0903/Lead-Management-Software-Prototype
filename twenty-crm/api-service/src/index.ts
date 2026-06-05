@@ -6,6 +6,7 @@ import clinicsRouter from "./routes/clinics.js";
 import leadsRouter from "./routes/leads.js";
 import whatsappRouter from "./routes/webhooks/whatsapp.js";
 import twentyTasksRouter from "./routes/webhooks/twentyTasks.js";
+import metaLeadsRouter from "./routes/webhooks/metaLeads.js";
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -27,6 +28,7 @@ app.use("/crm-api/clinics", clinicsRouter);
 app.use("/crm-api/leads", leadsRouter);
 app.use("/crm-api/webhooks/whatsapp", whatsappRouter);
 app.use("/crm-api/webhooks/twenty-tasks", twentyTasksRouter);
+app.use("/crm-api/webhooks/meta-leads", metaLeadsRouter);
 
 app.listen(PORT, () => {
   console.log(`[CRM API Service] Running on http://localhost:${PORT}`);
