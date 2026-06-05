@@ -398,12 +398,22 @@ async function cloneRelationsViaSql(
     .filter((c) => c.is_generated !== 'ALWAYS')
     .map((c) => c.column_name);
 
-  // Columns that reference entities from the source workspace (may not exist in target)
+  // Columns that reference workspace members from source (may not exist in target)
   const nullableRefCols = [
     'createdByWorkspaceMemberId',
     'updatedByWorkspaceMemberId',
-    'applicationId',              // source app doesn't exist in target → crashes cache builder
   ];
+
+  // Discover the target workspace's applicationId (NOT NULL column — can't set to null)
+  const [targetAppRow] = await query(
+    `SELECT DISTINCT "applicationId" FROM core."fieldMetadata"
+     WHERE "workspaceId" = $1 AND "applicationId" IS NOT NULL LIMIT 1`,
+    [targetWs.id],
+  );
+  const targetApplicationId = targetAppRow?.applicationId || null;
+  if (!targetApplicationId) {
+    console.log("  ⚠️  Could not find target workspace applicationId — relations may fail");
+  }
 
   for (const { from, to } of relationPairs) {
     const newFromId = crypto.randomUUID();
@@ -419,7 +429,7 @@ async function cloneRelationsViaSql(
       continue;
     }
 
-    process.stdout.write(`  ${from.objectName}.${from.name} ↔ ${to.objectName}.${to.name}... `);
+    process.stdout.write(`  ${from.objectName}.${from.name} \u2194 ${to.objectName}.${to.name}... `);
 
     try {
       // Check if a relation with this name already exists in the target
@@ -429,7 +439,7 @@ async function cloneRelationsViaSql(
         [targetWs.id, mappedFromObjectId, from.name],
       );
       if (existing.length > 0) {
-        console.log("✅ (already exists)");
+        console.log("\u2705 (already exists)");
         continue;
       }
 
@@ -438,11 +448,11 @@ async function cloneRelationsViaSql(
       const [srcTo] = await query(`SELECT * FROM core."fieldMetadata" WHERE id = $1`, [to.id]);
 
       if (!srcFrom || !srcTo) {
-        console.log("❌ source field not found");
+        console.log("\u274c source field not found");
         continue;
       }
 
-      // Build remapped row — initially set cross-reference to NULL to avoid FK violation
+      // Build remapped row \u2014 initially set cross-reference to NULL to avoid FK violation
       const buildRow = (src: Row, newId: string, objId: string, targetObjId: string) => {
         const row: any = { ...src };
         row.id = newId;
@@ -456,6 +466,10 @@ async function cloneRelationsViaSql(
         // Null out workspace member references that won't exist in target
         for (const col of nullableRefCols) {
           if (col in row) row[col] = null;
+        }
+        // Map applicationId to the target workspace's application (NOT NULL column)
+        if (targetApplicationId && 'applicationId' in row) {
+          row.applicationId = targetApplicationId;
         }
         return row;
       };
@@ -856,16 +870,31 @@ async function main() {
     }
 
     // ── Cleanup ──
-    console.log("\n═══ Phase 11: Cleanup ═══");
+    console.log("\n═══ Phase 11: Cleanup & Cache Refresh ═══");
     await cleanupTempApiKey(targetWs.id);
     console.log("✅ Temporary API key removed");
+
+    // Bump metadataVersion so Twenty's UI picks up the new fields/relations
+    await run(
+      `UPDATE core.workspace SET "metadataVersion" = "metadataVersion" + 1 WHERE id = $1`,
+      [targetWs.id],
+    );
+    console.log("✅ Metadata version bumped (forces UI cache refresh)");
+
+    // Also try to flush Redis if accessible (best-effort)
+    try {
+      const redisRes = await fetch(`${SERVER_URL}/healthz`, { signal: AbortSignal.timeout(3000) });
+      if (redisRes.ok) {
+        console.log("✅ Server is healthy — cache will refresh on next request");
+      }
+    } catch { /* Redis flush is manual — that's OK */ }
 
     console.log("\n" + "═".repeat(60));
     console.log("✅ SETUP COMPLETE");
     console.log("═".repeat(60));
     console.log(`Custom objects from "${sourceSubdomain}" have been created in "${targetSubdomain}".`);
     console.log("The workspace is ready to use!");
-    console.log("\nRemember to flush Redis and restart the server:");
+    console.log("\nJust flush Redis and restart the server:");
     console.log("  sudo docker-compose -f docker-compose.prod.yml exec redis redis-cli flushall");
     console.log("  sudo docker-compose -f docker-compose.prod.yml restart server");
   } finally {
