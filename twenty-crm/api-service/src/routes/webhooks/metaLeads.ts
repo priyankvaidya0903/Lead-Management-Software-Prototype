@@ -197,6 +197,8 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         ...(clinicId && { clinicId }),
         ...(treatment && { treatment }),
         ...(managerId && { managerId }),
+        ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
+        ...(leadData._ad_id && { adId: leadData._ad_id }),
       };
 
       const response = await fetch(TWENTY_WEBHOOK_URL, {
@@ -227,6 +229,8 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(treatment && { treatment }),
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
+      ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
+      ...(leadData._ad_id && { adId: leadData._ad_id }),
     };
 
     const response = await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}`, {
