@@ -132,7 +132,10 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   // Formatter for Twenty CRM Multi-Select / Select options
   const formatCrmOption = (val: string) => {
     if (!val) return "";
-    return val.toUpperCase().replace(/[- ]/g, "_");
+    let formatted = val.toUpperCase().replace(/[- ]/g, "_");
+    if (formatted === "YES_") return "YES";
+    if (formatted === "NO_") return "NO";
+    return formatted;
   };
 
   // Custom EmSculpt Form Fields
