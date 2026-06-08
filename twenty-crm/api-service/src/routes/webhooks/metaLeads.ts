@@ -91,7 +91,7 @@ async function fetchLeadData(leadgenId: string): Promise<Record<string, string> 
     const fields: Record<string, string> = {};
     if (data.field_data) {
       for (const field of data.field_data as MetaLeadField[]) {
-        fields[field.name.toLowerCase()] = field.values[0] || "";
+        fields[field.name.toLowerCase()] = field.values?.[0] || "";
       }
     }
 
@@ -128,6 +128,14 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   // Map source
   const source = "FACEBOOK_ADS";
+
+  // Custom EmSculpt Form Fields
+  const targetArea = leadData["which_area_are_you_looking_to_target?"] || "";
+  const primaryGoal = leadData["q2._what_is_your_primary_goal?"] || "";
+  const planningToStart = leadData["q3._when_are_you_planning_to_start?"] || "";
+  const previousTreatment = leadData["q4._have_you_tried_body_contouring_treatments_before?"] || "";
+  const preferredLocation = leadData["select_your_preferred_location"] || "";
+  const budget = leadData["preferred_transformation_budget"] || "";
 
   // Determine treatment if present in form
   let treatment = leadData.treatment || leadData.service || leadData.interest || "";
@@ -199,6 +207,12 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         ...(managerId && { managerId }),
         ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
         ...(leadData._ad_id && { adId: leadData._ad_id }),
+        ...(targetArea && { targetArea }),
+        ...(primaryGoal && { primaryGoal }),
+        ...(planningToStart && { planningToStart }),
+        ...(previousTreatment && { previousTreatment }),
+        ...(preferredLocation && { preferredLocation }),
+        ...(budget && { budget }),
       };
 
       const response = await fetch(TWENTY_WEBHOOK_URL, {
@@ -231,6 +245,12 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(managerId && { relationshipManagerId: managerId }),
       ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
       ...(leadData._ad_id && { adId: leadData._ad_id }),
+      ...(targetArea && { targetArea }),
+      ...(primaryGoal && { primaryGoal }),
+      ...(planningToStart && { planningToStart }),
+      ...(previousTreatment && { previousTreatment }),
+      ...(preferredLocation && { preferredLocation }),
+      ...(budget && { budget }),
     };
 
     const response = await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}`, {
