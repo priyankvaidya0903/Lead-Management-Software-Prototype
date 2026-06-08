@@ -212,7 +212,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         ...(planningToStart && { planningToStart: [planningToStart] }),
         ...(previousTreatment && { previousTreatment }),
         ...(preferredLocation && { preferredLocation: [preferredLocation] }),
-        ...(budget && { budget: [budget] }),
+        ...(budget && { budget }),
       };
 
       const response = await fetch(TWENTY_WEBHOOK_URL, {
@@ -250,7 +250,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(planningToStart && { planningToStart: [planningToStart] }),
       ...(previousTreatment && { previousTreatment }),
       ...(preferredLocation && { preferredLocation: [preferredLocation] }),
-      ...(budget && { budget: [budget] }),
+      ...(budget && { budget }),
     };
 
     const response = await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}`, {
