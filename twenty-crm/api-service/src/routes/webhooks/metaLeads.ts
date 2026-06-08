@@ -19,7 +19,7 @@
  */
 import { Router, Request, Response } from "express";
 import crypto from "node:crypto";
-import { getManagersForClinic } from "../../lib/twentyCrmClient.js";
+import { getManagersForClinic, getClinicsList } from "../../lib/twentyCrmClient.js";
 import { getNextManagerIndex } from "../../lib/roundRobin.js";
 
 const router = Router();
@@ -187,7 +187,23 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   }
 
   // ── Round-robin manager assignment ──
-  const clinicId = META_DEFAULT_CLINIC_ID;
+  let clinicId = META_DEFAULT_CLINIC_ID;
+
+  if (preferredLocation) {
+    try {
+      const clinics = await getClinicsList();
+      const matchedClinic = clinics.find(c => formatCrmOption(c.name) === preferredLocation);
+      if (matchedClinic) {
+        clinicId = matchedClinic.id;
+        console.log(`[Meta Leads] Dynamically matched clinic: ${matchedClinic.name} (${clinicId})`);
+      } else {
+        console.warn(`[Meta Leads] Could not find clinic matching "${preferredLocation}". Falling back to default.`);
+      }
+    } catch (e) {
+      console.error("[Meta Leads] Error fetching clinics list:", e);
+    }
+  }
+
   let managerId: string | null = null;
 
   if (clinicId) {
