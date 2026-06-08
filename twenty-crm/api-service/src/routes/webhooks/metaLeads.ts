@@ -130,7 +130,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   const source = "FACEBOOK_ADS";
 
   // Custom EmSculpt Form Fields
-  const targetArea = leadData["which_area_are_you_looking_to_target?"] || "";
+  const targetArea = leadData["q1._which_area_would_you_like_to_target?"] || leadData["which_area_are_you_looking_to_target?"] || "";
   const primaryGoal = leadData["q2._what_is_your_primary_goal?"] || "";
   const planningToStart = leadData["q3._when_are_you_planning_to_start?"] || "";
   const previousTreatment = leadData["q4._have_you_tried_body_contouring_treatments_before?"] || "";
