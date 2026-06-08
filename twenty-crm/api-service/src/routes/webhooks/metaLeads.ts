@@ -140,7 +140,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   const targetArea = formatCrmOption(leadData["q1._which_area_would_you_like_to_target?"] || leadData["which_area_are_you_looking_to_target?"]);
   const primaryGoal = formatCrmOption(leadData["q2._what_is_your_primary_goal?"]);
   const planningToStart = formatCrmOption(leadData["q3._when_are_you_planning_to_start?"]);
-  const previousTreatment = leadData["q4._have_you_tried_body_contouring_treatments_before?"]; // Left raw for Text fields
+  const previousTreatment = formatCrmOption(leadData["q4._have_you_tried_body_contouring_treatments_before?"]);
   const preferredLocation = formatCrmOption(leadData["select_your_preferred_location"]);
   const budget = leadData["preferred_transformation_budget"]; // Left raw for Text fields
 
@@ -217,7 +217,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         ...(targetArea && { targetArea }),
         ...(primaryGoal && { primaryGoal: [primaryGoal] }),
         ...(planningToStart && { planningToStart: [planningToStart] }),
-        ...(previousTreatment && { previousTreatment }),
+        ...(previousTreatment && { previousTreatment: [previousTreatment] }),
         ...(preferredLocation && { preferredLocation: [preferredLocation] }),
         ...(budget && { budget }),
       };
@@ -255,7 +255,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(targetArea && { targetArea }),
       ...(primaryGoal && { primaryGoal: [primaryGoal] }),
       ...(planningToStart && { planningToStart: [planningToStart] }),
-      ...(previousTreatment && { previousTreatment }),
+      ...(previousTreatment && { previousTreatment: [previousTreatment] }),
       ...(preferredLocation && { preferredLocation: [preferredLocation] }),
       ...(budget && { budget }),
     };
