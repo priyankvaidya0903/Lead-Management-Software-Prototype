@@ -129,13 +129,20 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   // Map source
   const source = "FACEBOOK_ADS";
 
+  // Formatter for Twenty CRM Multi-Select / Select options
+  const formatCrmOption = (val: string) => {
+    if (!val) return "";
+    return val.toUpperCase().replace(/[- ]/g, "_");
+  };
+
   // Custom EmSculpt Form Fields
-  const targetArea = leadData["q1._which_area_would_you_like_to_target?"] || leadData["which_area_are_you_looking_to_target?"] || "";
-  const primaryGoal = leadData["q2._what_is_your_primary_goal?"] || "";
-  const planningToStart = leadData["q3._when_are_you_planning_to_start?"] || "";
-  const previousTreatment = leadData["q4._have_you_tried_body_contouring_treatments_before?"] || "";
-  const preferredLocation = leadData["select_your_preferred_location"] || "";
-  const budget = leadData["preferred_transformation_budget"] || "";
+  // We apply formatCrmOption to fields that are Select/Multi-Select in Twenty CRM
+  const targetArea = formatCrmOption(leadData["q1._which_area_would_you_like_to_target?"] || leadData["which_area_are_you_looking_to_target?"]);
+  const primaryGoal = formatCrmOption(leadData["q2._what_is_your_primary_goal?"]);
+  const planningToStart = formatCrmOption(leadData["q3._when_are_you_planning_to_start?"]);
+  const previousTreatment = leadData["q4._have_you_tried_body_contouring_treatments_before?"]; // Left raw for Text fields
+  const preferredLocation = formatCrmOption(leadData["select_your_preferred_location"]);
+  const budget = leadData["preferred_transformation_budget"]; // Left raw for Text fields
 
   // Determine treatment if present in form
   let treatment = leadData.treatment || leadData.service || leadData.interest || "";
