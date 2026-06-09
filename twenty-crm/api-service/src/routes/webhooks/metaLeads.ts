@@ -138,13 +138,26 @@ async function createLeadInCRM(leadData: Record<string, string>) {
     return formatted;
   };
 
-  // Custom EmSculpt Form Fields
-  const targetArea = formatCrmOption(leadData["q1._which_area_would_you_like_to_target?"] || leadData["which_area_are_you_looking_to_target?"]);
-  const primaryGoal = formatCrmOption(leadData["q2._what_is_your_primary_goal?"]);
-  const planningToStart = formatCrmOption(leadData["q3._when_are_you_planning_to_start?"]);
-  const previousTreatment = formatCrmOption(leadData["q4._have_you_tried_body_contouring_treatments_before?"]);
-  const preferredLocation = formatCrmOption(leadData["select_your_preferred_location"]);
-  const budget = leadData["preferred_transformation_budget"]; // Left raw for Text fields
+  // Helper to fuzzy match Facebook form questions (since different forms have different keys)
+  const extractField = (keywords: string[]) => {
+    const matchedKey = Object.keys(leadData).find(key => 
+      keywords.some(kw => key.includes(kw))
+    );
+    return matchedKey ? leadData[matchedKey] : "";
+  };
+
+  // Custom EmSculpt Form Fields (Fuzzy matched for all forms)
+  const targetArea = formatCrmOption(extractField([
+    "area_would_you_like", 
+    "area_are_you_looking", 
+    "concern_would_you_like", 
+    "looking_to_treat"
+  ]));
+  const primaryGoal = formatCrmOption(extractField(["primary_goal"]));
+  const planningToStart = formatCrmOption(extractField(["planning_to_start"]));
+  const previousTreatment = formatCrmOption(extractField(["treatments_before"]));
+  const preferredLocation = formatCrmOption(extractField(["preferred_location"]));
+  const budget = extractField(["preferred_transformation_budget", "budget"]); // Left raw for Text fields
 
   // Determine treatment if present in form
   let treatment = leadData.treatment || leadData.service || leadData.interest || "";
