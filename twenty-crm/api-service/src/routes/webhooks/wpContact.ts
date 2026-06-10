@@ -51,10 +51,11 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (location) {
       try {
-        const locStr = location.toLowerCase();
+        const normalize = (str: string) => str.toLowerCase().replace(/[\s_-]/g, '');
+        const locStr = normalize(location);
         const clinics = await getClinicsList();
         const matchedClinic = clinics.find((c: any) => {
-          const cName = c.name.toLowerCase();
+          const cName = normalize(c.name);
           return cName.includes(locStr) || locStr.includes(cName);
         });
         

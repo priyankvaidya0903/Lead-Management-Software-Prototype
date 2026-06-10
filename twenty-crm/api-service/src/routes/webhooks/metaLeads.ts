@@ -204,10 +204,11 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   if (preferredLocation) {
     try {
-      const locStr = preferredLocation.toLowerCase();
+      const normalize = (str: string) => str.toLowerCase().replace(/[\s_-]/g, '');
+      const locStr = normalize(preferredLocation);
       const clinics = await getClinicsList();
       const matchedClinic = clinics.find(c => {
-        const cName = c.name.toLowerCase();
+        const cName = normalize(c.name);
         return cName.includes(locStr) || locStr.includes(cName);
       });
       if (matchedClinic) {
