@@ -51,9 +51,12 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (location) {
       try {
-        const formattedLoc = formatCrmOption(location);
+        const locStr = location.toLowerCase();
         const clinics = await getClinicsList();
-        const matchedClinic = clinics.find((c: any) => formatCrmOption(c.name) === formattedLoc);
+        const matchedClinic = clinics.find((c: any) => {
+          const cName = c.name.toLowerCase();
+          return cName.includes(locStr) || locStr.includes(cName);
+        });
         
         if (matchedClinic) {
           clinicId = matchedClinic.id;

@@ -204,8 +204,12 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   if (preferredLocation) {
     try {
+      const locStr = preferredLocation.toLowerCase();
       const clinics = await getClinicsList();
-      const matchedClinic = clinics.find(c => formatCrmOption(c.name) === preferredLocation);
+      const matchedClinic = clinics.find(c => {
+        const cName = c.name.toLowerCase();
+        return cName.includes(locStr) || locStr.includes(cName);
+      });
       if (matchedClinic) {
         clinicId = matchedClinic.id;
         console.log(`[Meta Leads] Dynamically matched clinic: ${matchedClinic.name} (${clinicId})`);
