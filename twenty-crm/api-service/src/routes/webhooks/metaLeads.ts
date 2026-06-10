@@ -277,7 +277,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone, primaryPhoneCallingCode: "+91" },
       source,
-      stage: "NEW",
+      stage: "REQUIREMENTS_GATHERED",
       ...(treatment && { treatment }),
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
