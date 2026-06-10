@@ -156,7 +156,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   const primaryGoal = formatCrmOption(extractField(["primary_goal"]));
   const planningToStart = formatCrmOption(extractField(["planning_to_start"]));
   const previousTreatment = formatCrmOption(extractField(["treatments_before"]));
-  const preferredLocation = formatCrmOption(extractField(["preferred_location"]));
+  const preferredLocation = extractField(["preferred_location", "preferred_clinic_location", "clinic_location"]);
   const budget = extractField(["preferred_transformation_budget", "budget"]); // Left raw for Text fields
 
   // Determine treatment if present in form
