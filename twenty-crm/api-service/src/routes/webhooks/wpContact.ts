@@ -41,7 +41,7 @@ router.post("/", async (req: Request, res: Response) => {
     
     const message = payload["your-message"] || payload["how-we-help"] || "";
     const rawConcern = payload["primary-concern"];
-    const targetArea = Array.isArray(rawConcern) ? rawConcern[0] : rawConcern;
+    const primaryGoal = Array.isArray(rawConcern) ? rawConcern[0] : rawConcern;
     const source = "WEBSITE_CONTACT_FORM";
 
     console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source}`);
@@ -87,7 +87,7 @@ router.post("/", async (req: Request, res: Response) => {
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone },
       stage: "REQUIREMENTS_GATHERED",
-      ...(targetArea && { targetArea }),
+      ...(primaryGoal && { primaryGoal }),
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
       ...(location && { preferredLocation: location }),
