@@ -25,7 +25,15 @@ router.post("/", async (req: Request, res: Response) => {
 
     const name = `${payload["your-name"] || ""} ${payload["last-name"] || ""}`.trim() || payload["full-name"] || "Website Lead";
     const email = payload["your-email"] || payload["email"] || "";
-    const phone = payload["your-tel"] || payload["full_number"] || payload["phone-number"] || "";
+    const rawPhone = payload["your-tel"] || payload["full_number"] || payload["phone-number"] || "";
+    
+    // Clean and format phone number for Twenty CRM (requires E.164 format)
+    let phone = rawPhone.replace(/[^0-9+]/g, '');
+    if (phone.length === 10 && !phone.startsWith('+')) {
+      phone = `+91${phone}`; // Default to India country code for 10-digit numbers
+    } else if (phone.length > 0 && !phone.startsWith('+')) {
+      phone = `+${phone}`;
+    }
     
     // CF7 sometimes sends checkboxes/radios as arrays
     const rawLocation = payload["location"] || payload["preferred-location"];
