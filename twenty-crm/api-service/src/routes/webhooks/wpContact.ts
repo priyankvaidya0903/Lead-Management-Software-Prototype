@@ -72,7 +72,7 @@ router.post("/", async (req: Request, res: Response) => {
       name,
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone },
-      source,
+      source: [source], // Wrap in array for multi-select field
       stage: "NEW",
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
