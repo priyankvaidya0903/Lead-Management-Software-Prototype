@@ -23,11 +23,17 @@ router.post("/", async (req: Request, res: Response) => {
     const payload = req.body;
     console.log("[WP CF7] Received webhook:", JSON.stringify(payload, null, 2));
 
-    const name = `${payload["your-name"] || ""} ${payload["last-name"] || ""}`.trim();
-    const email = payload["your-email"] || "";
-    const phone = payload["your-tel"] || payload["full_number"] || "";
-    const location = payload["location"] || "";
-    const message = payload["your-message"] || "";
+    const name = `${payload["your-name"] || ""} ${payload["last-name"] || ""}`.trim() || payload["full-name"] || "Website Lead";
+    const email = payload["your-email"] || payload["email"] || "";
+    const phone = payload["your-tel"] || payload["full_number"] || payload["phone-number"] || "";
+    
+    // CF7 sometimes sends checkboxes/radios as arrays
+    const rawLocation = payload["location"] || payload["preferred-location"];
+    const location = Array.isArray(rawLocation) ? rawLocation[0] : (rawLocation || "");
+    
+    const message = payload["your-message"] || payload["how-we-help"] || "";
+    const rawConcern = payload["primary-concern"];
+    const targetArea = Array.isArray(rawConcern) ? rawConcern[0] : rawConcern;
     const source = "WEBSITE_CONTACT_FORM";
 
     console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source}`);
@@ -74,6 +80,7 @@ router.post("/", async (req: Request, res: Response) => {
       phone: { primaryPhoneNumber: phone },
       source: [source], // Wrap in array for multi-select field
       stage: "NEW",
+      ...(targetArea && { targetArea }),
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
       ...(location && { preferredLocation: location }),
