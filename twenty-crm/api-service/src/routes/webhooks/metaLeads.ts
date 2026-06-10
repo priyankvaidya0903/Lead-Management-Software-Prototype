@@ -287,7 +287,6 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(primaryGoal && { primaryGoal }),
       ...(planningToStart && { planningToStart: [planningToStart] }),
       ...(previousTreatment && { previousTreatment: [previousTreatment] }),
-      ...(preferredLocation && { preferredLocation: [preferredLocation] }),
       ...(budget && { budget }),
     };
 

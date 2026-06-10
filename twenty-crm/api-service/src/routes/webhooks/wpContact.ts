@@ -88,8 +88,7 @@ router.post("/", async (req: Request, res: Response) => {
       phone: { primaryPhoneNumber: phone },
       stage: "REQUIREMENTS_GATHERED",
       ...(clinicId && { clinicsId: clinicId }),
-      ...(managerId && { relationshipManagerId: managerId }),
-      ...(location && { preferredLocation: location }),
+      ...(managerId && { relationshipManagerId: managerId })
     };
 
     const response = await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}`, {
