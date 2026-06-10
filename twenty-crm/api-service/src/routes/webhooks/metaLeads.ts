@@ -279,7 +279,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       source,
       stage: "REQUIREMENTS_GATHERED",
       ...(treatment && { treatment }),
-      ...(clinicId && { clinicsId: clinicId }),
+      ...(clinicId && { clinicId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
       ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
       ...(leadData._ad_id && { adId: leadData._ad_id }),
