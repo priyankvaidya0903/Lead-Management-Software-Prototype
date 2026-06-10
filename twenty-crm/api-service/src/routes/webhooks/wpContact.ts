@@ -87,7 +87,6 @@ router.post("/", async (req: Request, res: Response) => {
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone },
       stage: "REQUIREMENTS_GATHERED",
-      ...(primaryGoal && { primaryGoal }),
       ...(clinicId && { clinicsId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),
       ...(location && { preferredLocation: location }),
