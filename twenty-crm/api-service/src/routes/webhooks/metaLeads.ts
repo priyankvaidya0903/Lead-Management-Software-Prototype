@@ -127,7 +127,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   const city = leadData.city || "";
 
   // Map source
-  const source = "Facebook Ads";
+  const source = "FACEBOOK_ADS";
 
   // Formatter for Twenty CRM Multi-Select / Select options
   const formatCrmOption = (val: string) => {
@@ -245,6 +245,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         email,
         phone,
         source1: [source],
+        formid: leadData.formid || "",
         ...(clinicId && { clinicId }),
         ...(treatment && { treatment }),
         ...(managerId && { managerId }),
@@ -281,6 +282,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone, primaryPhoneCallingCode: "+91" },
       source1: [source],
+      formid: leadData.formid || "",
       stage: "REQUIREMENTS_GATHERED",
       ...(treatment && { treatment }),
       ...(clinicId && { clinicId: clinicId }),
@@ -351,12 +353,17 @@ router.post("/", async (req: Request, res: Response) => {
 
         console.log(`[Meta Leads] Processing leadgen_id: ${leadgenId}`);
 
+        const formId = value.form_id || "";
+
         // Fetch full lead data from Graph API
         const leadData = await fetchLeadData(leadgenId);
         if (!leadData) {
           console.error(`[Meta Leads] Could not fetch data for leadgen_id: ${leadgenId}`);
           continue;
         }
+
+        // Attach formId to leadData
+        leadData.formid = formId;
 
         // Create lead in Twenty CRM
         const result = await createLeadInCRM(leadData);

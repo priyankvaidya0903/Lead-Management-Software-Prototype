@@ -42,9 +42,10 @@ router.post("/", async (req: Request, res: Response) => {
     const message = payload["your-message"] || payload["how-we-help"] || "";
     const rawConcern = payload["primary-concern"];
     const primaryGoal = Array.isArray(rawConcern) ? rawConcern[0] : rawConcern;
-    const source = "Website Aayna Clinic";
+    const source = "WEBSITE_AAYNA_CLINIC";
+    const formid = payload["_wpcf7"] || "";
 
-    console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source}`);
+    console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source} | formid: ${formid}`);
 
     // ── Round-robin manager assignment ──
     let clinicId = META_DEFAULT_CLINIC_ID;
@@ -92,6 +93,7 @@ router.post("/", async (req: Request, res: Response) => {
       phone: { primaryPhoneNumber: phone },
       stage: "REQUIREMENTS_GATHERED",
       source1: [source],
+      formid: formid,
       ...(clinicId && { clinicId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId })
     };
