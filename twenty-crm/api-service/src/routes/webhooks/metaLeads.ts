@@ -251,10 +251,10 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         ...(managerId && { managerId }),
         ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
         ...(leadData._ad_id && { adId: leadData._ad_id }),
-        ...(targetArea && { targetArea }),
-        ...(primaryGoal && { primaryGoal }),
-        ...(planningToStart && { planningToStart: [planningToStart] }),
-        ...(previousTreatment && { previousTreatment: [previousTreatment] }),
+        ...(targetArea && { targetarea: targetArea }),
+        ...(primaryGoal && { primarygoal: primaryGoal }),
+        ...(planningToStart && { planningtostart: [planningToStart] }),
+        ...(previousTreatment && { previoustreatment: [previousTreatment] }),
         ...(budget && { budget }),
       };
 
@@ -289,10 +289,10 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       ...(managerId && { relationshipManagerId: managerId }),
       ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
       ...(leadData._ad_id && { adId: leadData._ad_id }),
-      ...(targetArea && { targetArea }),
-      ...(primaryGoal && { primaryGoal }),
-      ...(planningToStart && { planningToStart: [planningToStart] }),
-      ...(previousTreatment && { previousTreatment: [previousTreatment] }),
+      ...(targetArea && { targetarea: targetArea }),
+      ...(primaryGoal && { primarygoal: primaryGoal }),
+      ...(planningToStart && { planningtostart: [planningToStart] }),
+      ...(previousTreatment && { previoustreatment: [previousTreatment] }),
       ...(budget && { budget }),
     };
 

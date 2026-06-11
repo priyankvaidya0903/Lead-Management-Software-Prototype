@@ -100,7 +100,7 @@ router.post("/", async (req: Request, res: Response) => {
       stage: "REQUIREMENTS_GATHERED",
       source1: [source],
       formid: formid,
-      ...(primaryGoal && { primaryGoal }),
+      ...(primaryGoal && { primarygoal: primaryGoal }),
       ...(clinicId && { clinicId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId })
     };
