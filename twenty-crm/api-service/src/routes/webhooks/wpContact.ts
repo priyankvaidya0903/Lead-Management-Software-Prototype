@@ -42,7 +42,13 @@ router.post("/", async (req: Request, res: Response) => {
     const message = payload["your-message"] || payload["how-we-help"] || "";
     const rawConcern = payload["primary-concern"];
     const primaryGoal = Array.isArray(rawConcern) ? rawConcern[0] : rawConcern;
-    const source = "WEBSITE_AAYNA_CLINIC";
+    
+    // Differentiate between Aayna and Akara based on payload structure
+    let source = "WEBSITE_AAYNA_CLINIC"; // default
+    if (payload["your-name"] || payload["location"] || payload["your-tel"]) {
+      source = "WEBSITE_AKARA_WELLNESS";
+    }
+
     const formid = payload["_wpcf7"] || "";
 
     console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source} | formid: ${formid}`);
@@ -94,6 +100,7 @@ router.post("/", async (req: Request, res: Response) => {
       stage: "REQUIREMENTS_GATHERED",
       source1: [source],
       formid: formid,
+      ...(primaryGoal && { primaryGoal }),
       ...(clinicId && { clinicId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId })
     };
