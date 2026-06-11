@@ -353,7 +353,7 @@ router.post("/", async (req: Request, res: Response) => {
 
         console.log(`[Meta Leads] Processing leadgen_id: ${leadgenId}`);
 
-        const formId = value.form_id || "";
+        const formId = change.value?.form_id || "";
 
         // Fetch full lead data from Graph API
         const leadData = await fetchLeadData(leadgenId);
