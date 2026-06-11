@@ -127,7 +127,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   const city = leadData.city || "";
 
   // Map source
-  const source = "FACEBOOK_ADS";
+  const source = "Facebook Ads";
 
   // Formatter for Twenty CRM Multi-Select / Select options
   const formatCrmOption = (val: string) => {
@@ -245,6 +245,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
         email,
         phone,
         source,
+        source1: [source],
         ...(clinicId && { clinicId }),
         ...(treatment && { treatment }),
         ...(managerId && { managerId }),
@@ -281,6 +282,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone, primaryPhoneCallingCode: "+91" },
       source,
+      source1: [source],
       stage: "REQUIREMENTS_GATHERED",
       ...(treatment && { treatment }),
       ...(clinicId && { clinicId: clinicId }),
