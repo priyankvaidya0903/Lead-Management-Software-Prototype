@@ -258,7 +258,7 @@ router.post("/", async (req: Request, res: Response) => {
           messaging_product: "whatsapp",
           to: cleanPhoneNumber,
           type: "template",
-          template: { name: templateName, language: { code: "en_US" } }
+          template: { name: templateName, language: { code: process.env.META_WHATSAPP_TEMPLATE_LANG || "en" } }
         };
 
         const response = await fetch(graphApiUrl, {
@@ -308,7 +308,7 @@ router.post("/", async (req: Request, res: Response) => {
         messaging_product: "whatsapp",
         to: cleanPhoneNumber,
         type: "template",
-        template: { name: templateName, language: { code: "en_US" } }
+        template: { name: templateName, language: { code: process.env.META_WHATSAPP_TEMPLATE_LANG || "en" } }
       };
 
       const response = await fetch(graphApiUrl, {
