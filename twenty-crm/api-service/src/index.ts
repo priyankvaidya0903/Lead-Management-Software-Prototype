@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3002;
 
 // Middleware
 app.use(cors({
-  origin: ["http://localhost:3001", "http://localhost:3000"],
+  origin: ["http://localhost:3001", "http://localhost:3000", "https://seqra.clinikally.work", "https://aayna.seqra.clinikally.work"],
   credentials: true,
 }));
 app.use(express.json());
