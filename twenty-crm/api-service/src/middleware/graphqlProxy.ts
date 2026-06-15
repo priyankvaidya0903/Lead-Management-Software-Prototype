@@ -17,6 +17,8 @@ export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFun
   if (req.method !== "POST" || !req.body) {
     return next();
   }
+  
+  console.log(`[RLS Proxy] Received request: ${req.method} ${req.originalUrl}`);
 
   // Intercept the 'FindManyLeadss' query
   if (req.body.operationName === "FindManyLeadss") {
@@ -68,5 +70,12 @@ export const twentyProxy = createProxyMiddleware({
   on: {
     // Crucial: Re-serializes the req.body (which we modified) back into a stream
     proxyReq: fixRequestBody,
+    proxyRes: (proxyRes) => {
+      // Strip Twenty's CORS headers to prevent "duplicate header" CORS errors in the browser
+      delete proxyRes.headers['access-control-allow-origin'];
+      delete proxyRes.headers['access-control-allow-credentials'];
+      delete proxyRes.headers['access-control-allow-methods'];
+      delete proxyRes.headers['access-control-allow-headers'];
+    },
   },
 });
