@@ -30,6 +30,8 @@ export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFun
         // Decode the JWT (no signature check needed here since Twenty core will do it)
         const decoded = jwt.decode(token) as any;
         if (!decoded) return next();
+        
+        console.log(`[RLS Proxy] Decoded JWT:`, decoded);
 
         // Twenty usually stores user ID in `sub` or `id` or `userId`
         const userId = decoded.sub || decoded.id || decoded.userId;
