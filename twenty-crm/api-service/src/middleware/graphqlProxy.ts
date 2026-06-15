@@ -2,10 +2,13 @@ import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-// Mapping of Restricted User IDs to Allowed Clinic IDs
-const CLINIC_ACCESS_MAP: Record<string, string> = {
+// Mapping of Restricted User IDs to Allowed Clinic IDs (can be one or multiple)
+const CLINIC_ACCESS_MAP: Record<string, string[]> = {
   // priyankvaidya09@gmail.com
-  "c1df67a2-d6df-4470-98be-8f49f7b630b3": "e2e061fb-9169-4c07-b911-32ac926ce25d", 
+  "c1df67a2-d6df-4470-98be-8f49f7b630b3": [
+    "e2e061fb-9169-4c07-b911-32ac926ce25d"
+    // Add more clinic UUIDs here if they manage multiple!
+  ], 
 };
 
 /**
@@ -38,18 +41,18 @@ export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFun
 
         // If this user is restricted to a specific clinic
         if (userId && CLINIC_ACCESS_MAP[userId]) {
-          const allowedClinicId = CLINIC_ACCESS_MAP[userId];
-          console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinic ${allowedClinicId}`);
+          const allowedClinicIds = CLINIC_ACCESS_MAP[userId];
+          console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinics: ${allowedClinicIds.join(", ")}`);
 
           // Ensure variables object exists
           req.body.variables = req.body.variables || {};
           req.body.variables.filter = req.body.variables.filter || {};
 
           // Inject the clinic filter! 
-          // Twenty GraphQL syntax uses { clinicId: { eq: "..." } }
+          // Twenty GraphQL syntax uses { clinicId: { in: ["..."] } } for multiple matching
           req.body.variables.filter = {
             ...req.body.variables.filter,
-            clinicId: { eq: allowedClinicId }
+            clinicId: { in: allowedClinicIds }
           };
         }
       } catch (err) {
