@@ -67,6 +67,9 @@ export const twentyProxy = createProxyMiddleware({
   // Target points to Twenty CRM backend
   target: process.env.TWENTY_API_URL?.replace("/rest", "") || "http://localhost:3000",
   changeOrigin: true,
+  pathRewrite: {
+    '^/': '/graphql', // Express strips '/graphql' from the URL, so we must add it back before forwarding!
+  },
   on: {
     // Crucial: Re-serializes the req.body (which we modified) back into a stream
     proxyReq: fixRequestBody,
