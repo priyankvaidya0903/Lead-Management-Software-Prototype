@@ -207,10 +207,10 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing lead id" });
     }
 
-    // Collect current field values from headers (how Twenty sends them)
     const currentValues: Record<string, string> = {};
     for (const field of TRACKED_FIELDS) {
-      const headerKey = field.replace(/_/g, "_"); // headers come lowercase
+      // Nginx drops headers with underscores by default! We must use dashes for headers.
+      const headerKey = field.replace(/_/g, "-"); 
       const val = (req.headers[headerKey] as string) || payload?.[field] || "";
       if (val) currentValues[field] = val;
     }
