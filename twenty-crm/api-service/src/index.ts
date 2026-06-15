@@ -20,6 +20,8 @@ app.use(cors({
 }));
 app.use(express.json());
 
+import { graphqlRlsInterceptor, twentyProxy } from "./middleware/graphqlProxy.js";
+app.use("/graphql", graphqlRlsInterceptor, twentyProxy);
 // Health check
 app.get("/crm-api/health", (_req, res) => {
   res.json({ status: "ok", service: "twenty-crm-api-service" });

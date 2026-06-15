@@ -14,12 +14,15 @@
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.1.0",
+    "http-proxy-middleware": "^4.1.1",
     "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.21.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "tsx": "^4.19.0",
     "typescript": "^5"
