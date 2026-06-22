@@ -97,7 +97,7 @@ router.post("/", async (req: Request, res: Response) => {
       name,
       email: { primaryEmail: email },
       phone: { primaryPhoneNumber: phone },
-      stage: "REQUIREMENTS_GATHERED",
+      status: "REQUIREMENTS_GATHERED",
       source1: [source],
       formid: formid,
       ...(primaryGoal && { primarygoal: primaryGoal }),

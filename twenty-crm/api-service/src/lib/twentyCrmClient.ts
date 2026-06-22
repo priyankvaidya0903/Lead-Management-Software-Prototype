@@ -352,7 +352,7 @@ export async function updateLeadStage(leadId: string, newStage: string): Promise
       method: "PATCH",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        stage: newStage
+        status: newStage
       })
     });
 

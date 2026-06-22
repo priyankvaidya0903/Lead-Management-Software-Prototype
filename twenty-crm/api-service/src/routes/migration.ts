@@ -75,7 +75,7 @@ function applyStandardMapping(targetField: string, rawValue: unknown): unknown {
       primaryPhoneCountryCode: "IN"
     } : undefined;
   }
-  if (["source", "treatment", "stage", "status"].includes(targetField)) return normalizeSelect(rawValue);
+  if (["source", "treatment", "status"].includes(targetField)) return normalizeSelect(rawValue);
   if (typeof rawValue === "string") return rawValue.trim();
   return rawValue;
 }

@@ -10,7 +10,7 @@
  * Twenty Workflow Setup:
  *   Trigger: Record Updated → Leads
  *   Action: Webhook POST to /crm-api/webhooks/field-changes
- *   Headers: id, clinics_id, relationship_manager_id, stage, name
+ *   Headers: id, clinics_id, relationship_manager_id, status, name
  */
 
 import { Router, Request, Response } from "express";
@@ -23,13 +23,13 @@ const router = Router();
 const leadSnapshots = new Map<string, Record<string, string>>();
 
 // Fields we track for change logging
-const TRACKED_FIELDS = ["clinics_id", "relationship_manager_id", "stage", "name"];
+const TRACKED_FIELDS = ["clinics_id", "relationship_manager_id", "status", "name"];
 
 // Human-readable labels for field names
 const FIELD_LABELS: Record<string, string> = {
   clinics_id: "Clinic",
   relationship_manager_id: "Relationship Manager",
-  stage: "Stage",
+  status: "Stage",
   name: "Name",
 };
 
@@ -238,7 +238,7 @@ router.post("/", async (req: Request, res: Response) => {
           oldVal ? resolveIdToName(field, oldVal) : Promise.resolve("(none)"),
           resolveIdToName(field, newVal),
         ]);
-      } else if (field === "stage") {
+      } else if (field === "status") {
         oldName = oldVal ? formatStageValue(oldVal) : "(none)";
         newName = formatStageValue(newVal);
       } else {
@@ -301,7 +301,7 @@ router.get("/seed/:leadId", async (req: Request, res: Response) => {
     const snapshot: Record<string, string> = {};
     if (lead?.clinicsId) snapshot.clinics_id = lead.clinicsId;
     if (lead?.relationshipManagerId) snapshot.relationship_manager_id = lead.relationshipManagerId;
-    if (lead?.stage) snapshot.stage = lead.stage;
+    if (lead?.status) snapshot.status = lead.status;
     if (lead?.name) snapshot.name = lead.name;
 
     leadSnapshots.set(leadId, snapshot);
@@ -340,7 +340,7 @@ router.get("/seed-all", async (_req: Request, res: Response) => {
       if (lead?.clinicsId) snapshot.clinics_id = lead.clinicsId;
       if (lead?.relationshipManagerId)
         snapshot.relationship_manager_id = lead.relationshipManagerId;
-      if (lead?.stage) snapshot.stage = lead.stage;
+      if (lead?.status) snapshot.status = lead.status;
       if (lead?.name) snapshot.name = lead.name;
 
       leadSnapshots.set(lead.id, snapshot);

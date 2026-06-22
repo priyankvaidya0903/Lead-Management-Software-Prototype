@@ -81,7 +81,7 @@ router.post("/", async (req: Request, res: Response) => {
             Authorization: `Bearer ${TWENTY_API_KEY}`
           },
           body: JSON.stringify({
-            stage: "REPEAT_INQUIRY",
+            status: "REPEAT_INQUIRY",
             ...(source && { source }),
             ...(treatment && { treatment }),
           })

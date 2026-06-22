@@ -1,0 +1,39 @@
+{
+  "fieldMap": {
+    "Name": "name",
+    "Email": "email",
+    "Phone": "phone",
+    "Status": "status",
+    "Source": "source1",
+    "Product": "oldCrmTreatment",
+    "City": "city",
+    "Assigned User": "oldAssignedUser"
+  },
+  "valueMaps": {
+    "status": {
+      "pending": "FOLLOWUP",
+      "call disconnected": "NOT_PICKING_UP",
+      "ringing 1": "NOT_PICKING_UP",
+      "ringing": "NOT_PICKING_UP",
+      "appointment scheduled": "BOOKED_APPOINTMENT",
+      "follow up 1": "FOLLOWUP",
+      "follow up": "FOLLOWUP",
+      "invalid": "NOT_INTERESTED",
+      "budget client": "DROPOFF",
+      "lead transferred to ludhiana": "DROPOFF",
+      "call back": "FOLLOWUP",
+      "distance lead": "DROPOFF",
+      "parked": "FOLLOWUP",
+      "switch off": "NOT_PICKING_UP"
+    },
+    "source1": {
+      "ivr leads": "IVR_LEADS",
+      "chatbot": "CHATBOT",
+      "instagram form lead": "INSTAGRAM_FORM",
+      "best-skin-specialist-doctor-lp": "GOOGLE_ADS",
+      "best-skin-speacialist-in-delhi-new-lp": "GOOGLE_ADS",
+      "website lead": "WEBSITE_AAYNA_CLINIC",
+      "akara website leads": "WEBSITE_AKARA_WELLNESS"
+    }
+  }
+}

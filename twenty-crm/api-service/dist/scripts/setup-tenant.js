@@ -5,297 +5,331 @@ const { Client } = pg;
 const DATABASE_URL = process.env.PG_DATABASE_URL ||
     process.env.DATABASE_URL ||
     "postgres://postgres:postgres@localhost:5432/default";
-const SOURCE_WORKSPACE_ID = process.env.SOURCE_WORKSPACE_ID;
-const SOURCE_WORKSPACE_SCHEMA = process.env.SOURCE_WORKSPACE_SCHEMA;
-const SOURCE_WORKSPACE_SUBDOMAIN = process.env.SOURCE_WORKSPACE_SUBDOMAIN;
 const client = new Client({ connectionString: DATABASE_URL });
-function usage() {
-    console.error("Usage: npm run setup-tenant -- --name \"Clinic A\" --subdomain clinica [--custom-domain clinicA.seqra.clinikally.work] [--copy-data true|false]");
+function getArg(name) {
+    const index = process.argv.indexOf(`--${name}`);
+    if (index === -1)
+        return null;
+    return process.argv[index + 1] ?? null;
 }
-function parseArgs(argv) {
-    const args = {};
-    for (let i = 0; i < argv.length; i += 1) {
-        const token = argv[i];
-        if (!token.startsWith("--")) {
-            continue;
-        }
-        const key = token.slice(2);
-        const next = argv[i + 1];
-        if (!next || next.startsWith("--")) {
-            args[key] = "true";
-            continue;
-        }
-        args[key] = next;
-        i += 1;
-    }
-    return {
-        name: args.name,
-        subdomain: args.subdomain,
-        customDomain: args["custom-domain"] || null,
-        copyData: args["copy-data"] !== "false",
-    };
+async function run(query, values) {
+    return client.query(query, values);
 }
-function randomId() {
-    return crypto.randomUUID();
-}
-function randomInviteHash() {
-    return crypto.randomUUID();
-}
-function randomSchemaName() {
-    return `workspace_${crypto.randomBytes(12).toString("hex")}`;
-}
-function sqlString(value) {
-    if (value === null) {
-        return "NULL";
-    }
-    return `'${value.replace(/'/g, "''")}'`;
-}
-async function runPsql(query) {
-    await client.query(query);
-}
-async function queryRows(query) {
-    const result = await client.query(query);
+async function rows(query, values) {
+    const result = await client.query(query, values);
     return result.rows;
 }
-async function getSourceWorkspace() {
-    const whereClauses = [];
-    if (SOURCE_WORKSPACE_ID) {
-        whereClauses.push(`id = '${SOURCE_WORKSPACE_ID.replace(/'/g, "''")}'`);
+async function getWorkspaceBySubdomain(subdomain) {
+    const result = await rows(`SELECT id, "databaseSchema", subdomain, "displayName", "defaultRoleId", "workspaceCustomApplicationId"
+     FROM core.workspace
+     WHERE subdomain = $1
+     LIMIT 1`, [subdomain]);
+    if (result.length === 0) {
+        throw new Error(`Workspace not found for subdomain: ${subdomain}`);
     }
-    if (SOURCE_WORKSPACE_SCHEMA) {
-        whereClauses.push(`"databaseSchema" = '${SOURCE_WORKSPACE_SCHEMA.replace(/'/g, "''")}'`);
-    }
-    if (SOURCE_WORKSPACE_SUBDOMAIN) {
-        whereClauses.push(`subdomain = '${SOURCE_WORKSPACE_SUBDOMAIN.replace(/'/g, "''")}'`);
-    }
-    const whereSql = whereClauses.length > 0 ? whereClauses.join(" OR ") : 'subdomain = \'clinikally\'';
-    const rows = await queryRows(`
-    SELECT id, "displayName", "databaseSchema", subdomain, "customDomain", "defaultRoleId"
-    FROM core.workspace
-    WHERE ${whereSql}
-    LIMIT 1;
-  `);
-    if (rows.length === 0) {
-        throw new Error("Source workspace not found. Set SOURCE_WORKSPACE_ID or SOURCE_WORKSPACE_SUBDOMAIN.");
-    }
-    return rows[0];
+    return result[0];
 }
-async function ensureWorkspaceDoesNotExist(subdomain, customDomain) {
-    const clauses = [`subdomain = '${subdomain.replace(/'/g, "''")}'`];
-    if (customDomain) {
-        clauses.push(`"customDomain" = '${customDomain.replace(/'/g, "''")}'`);
-    }
-    const rows = await queryRows(`
-    SELECT id
-    FROM core.workspace
-    WHERE ${clauses.join(" OR ")}
-    LIMIT 1;
-  `);
-    if (rows.length > 0) {
-        throw new Error(`Workspace already exists for subdomain/custom domain: ${subdomain}`);
-    }
+async function getBaseTables(schema) {
+    return rows(`SELECT table_name
+     FROM information_schema.tables
+     WHERE table_schema = $1
+       AND table_type = 'BASE TABLE'
+     ORDER BY table_name`, [schema]);
 }
-async function cloneWorkspaceSchema(sourceSchema, targetSchema) {
-    const tables = await queryRows(`
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = '${sourceSchema}'
-      AND table_type = 'BASE TABLE'
-    ORDER BY table_name;
-  `);
-    if (tables.length === 0) {
-        throw new Error(`No tables found in source schema ${sourceSchema}`);
-    }
-    await runPsql(`CREATE SCHEMA "${targetSchema}";`);
-    for (const { table_name: tableName } of tables) {
-        await runPsql(`CREATE TABLE "${targetSchema}"."${tableName}" (LIKE "${sourceSchema}"."${tableName}" INCLUDING ALL);`);
-    }
-    const sequences = await queryRows(`
-    SELECT sequence_name
-    FROM information_schema.sequences
-    WHERE sequence_schema = '${sourceSchema}'
-    ORDER BY sequence_name;
-  `);
-    for (const { sequence_name: sequenceName } of sequences) {
-        await runPsql(`CREATE SEQUENCE "${targetSchema}"."${sequenceName}";`);
-    }
-    const enums = await queryRows(`
-    SELECT t.typname, string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder) AS labels
-    FROM pg_type t
-    JOIN pg_enum e ON e.enumtypid = t.oid
-    JOIN pg_namespace n ON n.oid = t.typnamespace
-    WHERE n.nspname = '${sourceSchema}'
-    GROUP BY t.typname
-    ORDER BY t.typname;
-  `);
+async function getTableColumns(schema, table) {
+    return rows(`SELECT column_name, data_type
+     FROM information_schema.columns
+     WHERE table_schema = $1
+       AND table_name = $2
+       AND is_generated = 'NEVER'
+     ORDER BY ordinal_position`, [schema, table]);
+}
+function quoteIdentifier(value) {
+    return `"${value.replace(/"/g, '""')}"`;
+}
+async function recreateTargetSchemaFromSource(sourceSchema, targetSchema) {
+    await run(`DROP SCHEMA IF EXISTS ${quoteIdentifier(targetSchema)} CASCADE`);
+    await run(`CREATE SCHEMA ${quoteIdentifier(targetSchema)}`);
+    const enums = await rows(`SELECT t.typname, string_agg(quote_literal(e.enumlabel), ', ' ORDER BY e.enumsortorder) AS labels
+     FROM pg_type t
+     JOIN pg_enum e ON e.enumtypid = t.oid
+     JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE n.nspname = $1
+     GROUP BY t.typname
+     ORDER BY t.typname`, [sourceSchema]);
     for (const enumType of enums) {
-        await runPsql(`CREATE TYPE "${targetSchema}"."${enumType.typname}" AS ENUM (${enumType.labels});`);
+        await run(`CREATE TYPE ${quoteIdentifier(targetSchema)}.${quoteIdentifier(enumType.typname)} AS ENUM (${enumType.labels})`);
     }
-}
-async function copyWorkspaceSchemaData(sourceSchema, targetSchema, copyData) {
-    const tables = await queryRows(`
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = '${sourceSchema}'
-      AND table_type = 'BASE TABLE'
-    ORDER BY table_name;
-  `);
-    for (const { table_name: tableName } of tables) {
-        if (!copyData && !["workflow", "workflowVersion", "workflowAutomatedTrigger"].includes(tableName)) {
+    const tables = await getBaseTables(sourceSchema);
+    for (const { table_name } of tables) {
+        await run(`CREATE TABLE ${quoteIdentifier(targetSchema)}.${quoteIdentifier(table_name)} (LIKE ${quoteIdentifier(sourceSchema)}.${quoteIdentifier(table_name)} INCLUDING ALL)`);
+    }
+    const sequences = await rows(`SELECT sequence_name
+     FROM information_schema.sequences
+     WHERE sequence_schema = $1
+     ORDER BY sequence_name`, [sourceSchema]);
+    for (const sequence of sequences) {
+        await run(`CREATE SEQUENCE ${quoteIdentifier(targetSchema)}.${quoteIdentifier(sequence.sequence_name)}`);
+    }
+    for (const { table_name } of tables) {
+        const columns = await getTableColumns(sourceSchema, table_name);
+        if (columns.length === 0)
             continue;
-        }
-        await runPsql(`INSERT INTO "${targetSchema}"."${tableName}" SELECT * FROM "${sourceSchema}"."${tableName}";`);
+        const columnSql = columns.map((column) => quoteIdentifier(column.column_name)).join(", ");
+        await run(`INSERT INTO ${quoteIdentifier(targetSchema)}.${quoteIdentifier(table_name)} (${columnSql})
+       SELECT ${columnSql}
+       FROM ${quoteIdentifier(sourceSchema)}.${quoteIdentifier(table_name)}`);
     }
 }
-async function cloneCoreWorkspaceRecords(source, target) {
-    const targetWorkspaceId = target.id;
-    const targetSchema = target.schema;
-    const targetSubdomain = target.subdomain;
-    const targetCustomDomain = target.customDomain;
-    const targetDisplayName = target.name;
-    const inviteHash = randomInviteHash();
-    await runPsql(`
-    INSERT INTO core.workspace (
-      id,
-      "displayName",
-      logo,
-      "inviteHash",
-      "deletedAt",
-      "createdAt",
-      "updatedAt",
-      "allowImpersonation",
-      "isPublicInviteLinkEnabled",
-      "activationStatus",
-      "metadataVersion",
-      "databaseSchema",
-      subdomain,
-      "customDomain",
-      "isGoogleAuthEnabled",
-      "isTwoFactorAuthenticationEnforced",
-      "isPasswordAuthEnabled",
-      "isMicrosoftAuthEnabled",
-      "isCustomDomainEnabled",
-      "defaultRoleId",
-      "trashRetentionDays",
-      "routerModel",
-      "isGoogleAuthBypassEnabled",
-      "isPasswordAuthBypassEnabled",
-      "isMicrosoftAuthBypassEnabled",
-      "workspaceCustomApplicationId",
-      "editableProfileFields",
-      "fastModel",
-      "smartModel",
-      "eventLogRetentionDays",
-      "suspendedAt",
-      "aiAdditionalInstructions",
-      "logoFileId",
-      "enabledAiModelIds",
-      "useRecommendedModels",
-      "isInternalMessagesImportEnabled"
-    )
-    SELECT
-      '${targetWorkspaceId}',
-      ${sqlString(targetDisplayName)},
-      logo,
-      ${sqlString(inviteHash)},
-      NULL,
-      NOW(),
-      NOW(),
-      "allowImpersonation",
-      "isPublicInviteLinkEnabled",
-      'ACTIVE',
-      "metadataVersion",
-      ${sqlString(targetSchema)},
-      ${sqlString(targetSubdomain)},
-      ${sqlString(targetCustomDomain)},
-      "isGoogleAuthEnabled",
-      "isTwoFactorAuthenticationEnforced",
-      "isPasswordAuthEnabled",
-      "isMicrosoftAuthEnabled",
-      ${targetCustomDomain ? "true" : '"isCustomDomainEnabled"'},
-      "defaultRoleId",
-      "trashRetentionDays",
-      "routerModel",
-      "isGoogleAuthBypassEnabled",
-      "isPasswordAuthBypassEnabled",
-      "isMicrosoftAuthBypassEnabled",
-      "workspaceCustomApplicationId",
-      "editableProfileFields",
-      "fastModel",
-      "smartModel",
-      "eventLogRetentionDays",
-      NULL,
-      "aiAdditionalInstructions",
-      "logoFileId",
-      "enabledAiModelIds",
-      "useRecommendedModels",
-      "isInternalMessagesImportEnabled"
-    FROM core.workspace
-    WHERE id = '${source.id}';
-  `);
-    const tablesToClone = [
+async function deleteTargetCoreData(targetWorkspaceId, customAppId) {
+    const tables = [
+        'core."viewSort"',
+        'core."viewGroup"',
+        'core."viewFilter"',
+        'core."viewFilterGroup"',
+        'core."viewField"',
+        'core."viewFieldGroup"',
+        'core.view',
+        'core."roleTarget"',
+        'core."rolePermissionFlag"',
+        'core.role',
+        'core."relationMetadata"',
+        'core.relation',
+        'core."indexMetadata"',
+        'core.index',
+        'core."fieldMetadata"',
+        'core."objectMetadata"',
+        'core."dataSource"',
+        'core.webhook',
+        'core.agent',
+        'core."applicationVariable"',
+        'core.application',
+    ];
+    // Filter out tables that do not exist in the database
+    const validTables = [];
+    for (const table of tables) {
+        const tableName = table.replace('core."', '').replace('"', '');
+        const res = await rows(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'core' AND table_name = $1`, [tableName]);
+        if (Number(res[0].count) > 0) {
+            validTables.push(table);
+        }
+    }
+    // Disable FK constraints
+    await run("SET CONSTRAINTS ALL DEFERRED");
+    for (const table of validTables) {
+        await run(`DELETE FROM ${table} WHERE "workspaceId" = $1`, [targetWorkspaceId]);
+        if (table === 'core.application' && customAppId) {
+            await run(`DELETE FROM ${table} WHERE id = $1`, [customAppId]);
+        }
+    }
+}
+async function fetchWorkspaceRows(table, workspaceId) {
+    return rows(`SELECT * FROM ${table} WHERE "workspaceId" = $1`, [workspaceId]);
+}
+async function getColumnTypes(table) {
+    const [schemaNameRaw, tableNameRaw] = table.split(".");
+    const schemaName = schemaNameRaw.replace(/"/g, "");
+    const tableName = tableNameRaw.replace(/"/g, "");
+    return getTableColumns(schemaName, tableName);
+}
+async function insertRows(table, data) {
+    if (data.length === 0)
+        return;
+    const columnTypes = await getColumnTypes(table);
+    const allowedColumns = new Map(columnTypes.map((column) => [column.column_name, column.data_type]));
+    for (const row of data) {
+        const colNames = [];
+        const values = [];
+        const placeholders = [];
+        let index = 1;
+        for (const [key, value] of Object.entries(row)) {
+            const dataType = allowedColumns.get(key);
+            if (!dataType)
+                continue;
+            colNames.push(quoteIdentifier(key));
+            if (dataType === "json" || dataType === "jsonb") {
+                values.push(value == null ? null : JSON.stringify(value));
+                placeholders.push(`$${index}::jsonb`);
+            }
+            else {
+                values.push(value);
+                placeholders.push(`$${index}`);
+            }
+            index += 1;
+        }
+        await run(`INSERT INTO ${table} (${colNames.join(", ")}) VALUES (${placeholders.join(", ")})`, values);
+    }
+}
+async function cloneCoreWorkspaceData(sourceWorkspaceId, targetWorkspaceId, customAppId) {
+    const tables = [
+        'core.application',
+        'core."applicationVariable"',
         'core."dataSource"',
         'core."objectMetadata"',
         'core."fieldMetadata"',
+        'core."indexMetadata"',
+        'core.index',
+        'core."relationMetadata"',
+        'core.relation',
         'core.role',
         'core."rolePermissionFlag"',
         'core."roleTarget"',
         'core.view',
-        'core."viewField"',
         'core."viewFieldGroup"',
-        'core."viewFilter"',
+        'core."viewField"',
         'core."viewFilterGroup"',
+        'core."viewFilter"',
         'core."viewGroup"',
         'core."viewSort"',
         'core.webhook',
-        'core.application',
-        'core."applicationVariable"',
         'core.agent',
     ];
-    for (const table of tablesToClone) {
-        await runPsql(`
-      INSERT INTO ${table}
-      SELECT *
-      FROM ${table}
-      WHERE "workspaceId" = '${source.id}';
-    `);
-        await runPsql(`
-      UPDATE ${table}
-      SET "workspaceId" = '${targetWorkspaceId}'
-      WHERE "workspaceId" = '${source.id}';
-    `);
+    // Filter out tables that do not exist in the database
+    const validTables = [];
+    for (const table of tables) {
+        const tableName = table.replace('core."', '').replace('"', '');
+        const res = await rows(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'core' AND table_name = $1`, [tableName]);
+        if (Number(res[0].count) > 0) {
+            validTables.push(table);
+        }
+    }
+    const idMap = new Map();
+    const dataByTable = {};
+    idMap.set(sourceWorkspaceId, targetWorkspaceId);
+    for (const table of validTables) {
+        const tableRows = await fetchWorkspaceRows(table, sourceWorkspaceId);
+        if (table === 'core.application' && customAppId) {
+            const customApp = await rows(`SELECT * FROM ${table} WHERE id = $1`, [customAppId]);
+            if (customApp.length > 0 && !tableRows.some((r) => r.id === customApp[0].id)) {
+                tableRows.push(customApp[0]);
+            }
+        }
+        dataByTable[table] = tableRows;
+        for (const row of tableRows) {
+            if (row.id) {
+                idMap.set(row.id, crypto.randomUUID());
+            }
+        }
+    }
+    for (const table of validTables) {
+        const tableRows = dataByTable[table] || [];
+        for (const row of tableRows) {
+            for (const [key, value] of Object.entries(row)) {
+                if (typeof value === "string" && idMap.has(value)) {
+                    row[key] = idMap.get(value);
+                }
+            }
+            row.workspaceId = targetWorkspaceId;
+            if (table === "core.application") {
+                row.packageJsonFileId = null;
+                row.yarnLockFileId = null;
+            }
+        }
+    }
+    for (const table of validTables) {
+        await insertRows(table, dataByTable[table]);
+    }
+    return idMap;
+}
+async function remapSchemaUuids(targetSchema, idMap) {
+    const tables = await getBaseTables(targetSchema);
+    await run(`CREATE TEMP TABLE id_map_temp (old_id uuid, new_id uuid) ON COMMIT DROP`);
+    const mappings = Array.from(idMap.entries());
+    for (const [oldId, newId] of mappings) {
+        await run(`INSERT INTO id_map_temp (old_id, new_id) VALUES ($1, $2)`, [oldId, newId]);
+    }
+    for (const { table_name } of tables) {
+        const uuidColumns = await rows(`SELECT column_name
+       FROM information_schema.columns
+       WHERE table_schema = $1
+         AND table_name = $2
+         AND data_type = 'uuid'`, [targetSchema, table_name]);
+        for (const column of uuidColumns) {
+            await run(`UPDATE ${quoteIdentifier(targetSchema)}.${quoteIdentifier(table_name)} target
+         SET ${quoteIdentifier(column.column_name)} = map.new_id
+         FROM id_map_temp map
+         WHERE target.${quoteIdentifier(column.column_name)} = map.old_id`);
+        }
     }
 }
 async function main() {
-    const { name, subdomain, customDomain, copyData } = parseArgs(process.argv.slice(2));
-    if (!name || !subdomain) {
-        usage();
-        process.exit(1);
+    const sourceSubdomain = getArg("source-subdomain");
+    const targetSubdomain = getArg("target-subdomain");
+    if (!sourceSubdomain || !targetSubdomain) {
+        throw new Error("Usage: npx tsx scripts/setup-tenant.ts --source-subdomain demo --target-subdomain clinica");
     }
-    const source = await getSourceWorkspace();
-    const targetWorkspaceId = randomId();
-    const targetSchema = randomSchemaName();
-    console.log(`Cloning workspace ${source.id} (${source.databaseSchema}) to ${subdomain}...`);
-    await ensureWorkspaceDoesNotExist(subdomain, customDomain);
-    await cloneWorkspaceSchema(source.databaseSchema, targetSchema);
-    await copyWorkspaceSchemaData(source.databaseSchema, targetSchema, copyData);
-    await cloneCoreWorkspaceRecords(source, {
-        id: targetWorkspaceId,
-        name,
-        subdomain,
-        customDomain,
-        schema: targetSchema,
-    });
-    console.log("✅ Workspace clone complete");
-    console.log(`Workspace ID: ${targetWorkspaceId}`);
-    console.log(`Schema: ${targetSchema}`);
-    console.log(`Subdomain: ${subdomain}`);
-    if (customDomain) {
-        console.log(`Custom domain: ${customDomain}`);
+    await client.connect();
+    await run("BEGIN");
+    await run("SET LOCAL session_replication_role = 'replica'");
+    const sourceWorkspace = await getWorkspaceBySubdomain(sourceSubdomain);
+    const targetWorkspace = await getWorkspaceBySubdomain(targetSubdomain);
+    console.log(`Source: ${sourceWorkspace.id} (${sourceWorkspace.databaseSchema})`);
+    console.log(`Target: ${targetWorkspace.id} (${targetWorkspace.databaseSchema})`);
+    if (sourceWorkspace.id === targetWorkspace.id) {
+        throw new Error("Source and target workspace cannot be the same");
     }
+    // BACKUP the workspaceMember from target before wiping
+    const targetMembers = await rows(`SELECT * FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
+    // BACKUP roleTarget from target before wiping
+    const targetRoleTargets = await rows(`SELECT * FROM core."roleTarget" WHERE "workspaceId" = $1`, [targetWorkspace.id]);
+    await deleteTargetCoreData(targetWorkspace.id, targetWorkspace.workspaceCustomApplicationId);
+    await recreateTargetSchemaFromSource(sourceWorkspace.databaseSchema, targetWorkspace.databaseSchema);
+    const idMap = await cloneCoreWorkspaceData(sourceWorkspace.id, targetWorkspace.id, sourceWorkspace.workspaceCustomApplicationId);
+    await remapSchemaUuids(targetWorkspace.databaseSchema, idMap);
+    // Restore Default Role and Custom App
+    const newRoleId = sourceWorkspace.defaultRoleId && idMap.has(sourceWorkspace.defaultRoleId)
+        ? idMap.get(sourceWorkspace.defaultRoleId)
+        : null;
+    if (newRoleId) {
+        await run(`UPDATE core.workspace SET "defaultRoleId" = $1 WHERE id = $2`, [newRoleId, targetWorkspace.id]);
+    }
+    const newAppId = sourceWorkspace.workspaceCustomApplicationId && idMap.has(sourceWorkspace.workspaceCustomApplicationId)
+        ? idMap.get(sourceWorkspace.workspaceCustomApplicationId)
+        : null;
+    if (newAppId) {
+        await run(`UPDATE core.workspace SET "workspaceCustomApplicationId" = $1 WHERE id = $2`, [newAppId, targetWorkspace.id]);
+    }
+    // RESTORE workspaceMembers into the target schema
+    if (targetMembers.length > 0) {
+        // Delete any members cloned from the source
+        await run(`DELETE FROM ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember"`);
+        // Re-insert the original target members
+        for (const member of targetMembers) {
+            // Remove generated columns to avoid insertion errors
+            delete member.searchVector;
+            const colNames = Object.keys(member).map(quoteIdentifier).join(", ");
+            const placeholders = Object.keys(member).map((_, i) => `$${i + 1}`).join(", ");
+            const values = Object.values(member);
+            await run(`INSERT INTO ${quoteIdentifier(targetWorkspace.databaseSchema)}."workspaceMember" (${colNames}) VALUES (${placeholders})`, values);
+        }
+    }
+    // RESTORE roleTargets back, pointing to the new cloned admin role
+    if (targetRoleTargets.length > 0 && newRoleId) {
+        for (const rt of targetRoleTargets) {
+            // Use the newly cloned role
+            rt.roleId = newRoleId;
+            // Generate a new ID just in case
+            rt.id = crypto.randomUUID();
+            // If there's a universalIdentifier, generate a new one so it doesn't conflict
+            if (rt.universalIdentifier) {
+                rt.universalIdentifier = crypto.randomUUID();
+            }
+            const colNames = Object.keys(rt).map(quoteIdentifier).join(", ");
+            const placeholders = Object.keys(rt).map((_, i) => `$${i + 1}`).join(", ");
+            const values = Object.values(rt);
+            await run(`INSERT INTO core."roleTarget" (${colNames}) VALUES (${placeholders})`, values);
+        }
+    }
+    await run("COMMIT");
+    console.log("✅ Clone complete into existing workspace");
+    await client.end();
 }
-main().catch((error) => {
-    console.error("❌ Workspace clone failed");
-    console.error(error);
+main().catch(async (error) => {
+    try {
+        await run("ROLLBACK");
+    }
+    catch { }
+    await client.end().catch(() => { });
+    console.error("❌ Failed:", error.message);
     process.exit(1);
 });

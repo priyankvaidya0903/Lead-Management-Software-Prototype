@@ -63,13 +63,28 @@ export async function getManagersForClinic(clinicId) {
             data?.[objectName] ??
             data?.data ??
             [];
-        const managers = rawManagers.map((m) => ({
+        // Map raw data and include availability field
+        const allManagers = rawManagers.map((m) => ({
             id: m.id,
             name: m.name,
             clinicId: m[clinicField],
+            availability: m.availability,
         }));
-        console.log(`[TwentyCRM] Found ${managers.length} manager(s) for clinic ${clinicId}`);
-        // Store in cache
+        // Filter: only keep managers whose availability is "Yes" (or "YES", "yes")
+        // If a manager has no availability field set, we INCLUDE them (backwards compatible)
+        const managers = allManagers.filter((m) => {
+            const avail = String(m.availability || "").toUpperCase();
+            if (!m.availability) {
+                console.log(`[TwentyCRM] Manager ${m.name} has no availability set — including by default`);
+                return true;
+            }
+            if (avail === "YES")
+                return true;
+            console.log(`[TwentyCRM] Manager ${m.name} is unavailable (availability: ${m.availability}) — skipping`);
+            return false;
+        });
+        console.log(`[TwentyCRM] Found ${allManagers.length} total manager(s), ${managers.length} available for clinic ${clinicId}`);
+        // Store in cache (only available managers)
         managerCache.set(clinicId, { managers, fetchedAt: Date.now() });
         return managers;
     }

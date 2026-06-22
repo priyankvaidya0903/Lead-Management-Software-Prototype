@@ -186,7 +186,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
             method: "PATCH",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${TWENTY_API_KEY}` },
             body: JSON.stringify({
-              stage: "REPEAT_INQUIRY",
+              status: "REPEAT_INQUIRY",
               source,
               ...(treatment && { treatment }),
             }),
@@ -283,7 +283,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       phone: { primaryPhoneNumber: phone, primaryPhoneCallingCode: "+91" },
       source1: [source],
       formid: leadData.formid || "",
-      stage: "REQUIREMENTS_GATHERED",
+      status: "REQUIREMENTS_GATHERED",
       ...(treatment && { treatment }),
       ...(clinicId && { clinicId: clinicId }),
       ...(managerId && { relationshipManagerId: managerId }),

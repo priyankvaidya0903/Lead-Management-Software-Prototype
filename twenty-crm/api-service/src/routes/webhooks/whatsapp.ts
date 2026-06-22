@@ -201,10 +201,10 @@ router.post("/", async (req: Request, res: Response) => {
 
     // OUTBOUND MESSAGES FROM TWENTY CRM
     const leadData = payload?.data ?? payload;
-    const stage = headerStage || leadData?.stage;
+    const status = headerStage || leadData?.status;
     const leadId = leadData?.id || req.headers["id"];
 
-    console.log(`[WhatsApp Webhook] Received webhook from Twenty CRM! Lead ID: ${leadId}, Stage: ${stage}`);
+    console.log(`[WhatsApp Webhook] Received webhook from Twenty CRM! Lead ID: ${leadId}, Status: ${status}`);
     console.log(`[WhatsApp Webhook] Full Payload:`, JSON.stringify(payload, null, 2));
     console.log(`[WhatsApp Webhook] Headers:`, JSON.stringify(req.headers, null, 2));
 
@@ -233,10 +233,10 @@ router.post("/", async (req: Request, res: Response) => {
     console.log(`[WhatsApp Webhook] Parsed phone number: ${phoneNumber} -> ${cleanPhoneNumber}`);
 
     // ─── STAGE: REQ BY WHATSAPP ─────────────────────────────────────────────────
-    if (stage === "REQ_BY_WHATSAPP") {
+    if (status === "REQ_BY_WHATSAPP") {
       if (leadId && redis) {
         const botStateKey = `bot_state:${leadId}`;
-        const idempotencyKey = `whatsapp_sent:${leadId}:${stage}`;
+        const idempotencyKey = `whatsapp_sent:${leadId}:${status}`;
 
         // *** IDEMPOTENCY DISABLED FOR TESTING ***
         // const lock = await redis.set(idempotencyKey, "sent", "EX", 86400, "NX");
@@ -286,10 +286,10 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     // ─── STAGE: NOT PICKING UP ──────────────────────────────────────────────────
-    if (stage === "NOT_PICKING_UP") {
+    if (status === "NOT_PICKING_UP") {
       if (leadId && redis) {
         // *** IDEMPOTENCY DISABLED FOR TESTING ***
-        // const idempotencyKey = `whatsapp_sent:${leadId}:${stage}`;
+        // const idempotencyKey = `whatsapp_sent:${leadId}:${status}`;
         // const lock = await redis.set(idempotencyKey, "sent", "EX", 86400, "NX");
         // if (!lock) {
         //   return res.json({ success: true, message: "Duplicate webhook ignored" });
@@ -323,7 +323,7 @@ router.post("/", async (req: Request, res: Response) => {
       const responseData = await response.json();
       if (!response.ok) {
         console.error(`[WhatsApp Webhook] Failed to send NOT_PICKING_UP message. Meta API responded with:`, JSON.stringify(responseData, null, 2));
-        if (leadId && redis) await redis.del(`whatsapp_sent:${leadId}:${stage}`);
+        if (leadId && redis) await redis.del(`whatsapp_sent:${leadId}:${status}`);
         return res.status(500).json({ error: "Failed to send Meta message", details: responseData });
       }
 
@@ -331,8 +331,8 @@ router.post("/", async (req: Request, res: Response) => {
       return res.json({ success: true, messageId: responseData?.messages?.[0]?.id });
     }
 
-    console.log(`[WhatsApp Webhook] Webhook ignored. Stage "${stage}" is not configured for WhatsApp triggers.`);
-    res.json({ message: "Stage ignored" });
+    console.log(`[WhatsApp Webhook] Webhook ignored. Status "${status}" is not configured for WhatsApp triggers.`);
+    res.json({ message: "Status ignored" });
 
   } catch (error) {
     console.error("[WhatsApp Webhook] Error processing webhook:", error);
