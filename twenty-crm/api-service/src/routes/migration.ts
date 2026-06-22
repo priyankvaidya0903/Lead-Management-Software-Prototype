@@ -203,6 +203,9 @@ router.post("/run", async (req: Request, res: Response) => {
   const objectName = config.targetObject || "leadss";
   const uniqueBy = config.uniqueBy?.length ? config.uniqueBy : ["email", "phone"];
   const dryRun = Boolean(config.dryRun);
+  
+  console.log(`[Migration API] Received request to /run with ${records.length} records. (dryRun: ${dryRun})`);
+  
   const transformed = records.map((record) => transformRecord(record, config));
 
   const summary = {
@@ -228,20 +231,26 @@ router.post("/run", async (req: Request, res: Response) => {
     summary.valid += 1;
 
     if (dryRun) {
+      console.log(`[Migration API] Dry-run: skipping upsert for ${item.fingerprint}`);
       output.push({ fingerprint: item.fingerprint, status: "dry-run", transformed: item.transformed });
       continue;
     }
 
     try {
+      console.log(`[Migration API] Upserting record for ${item.fingerprint}...`);
       const result = await upsertRecord(apiUrl, apiKey, objectName, item.transformed, uniqueBy);
       if (result.action === "created") summary.created += 1;
       if (result.action === "updated") summary.updated += 1;
+      console.log(`[Migration API] ✅ Success: ${result.action} record (ID: ${result.existingId || 'N/A'})`);
       output.push({ fingerprint: item.fingerprint, status: result.action, id: result.existingId, transformed: item.transformed });
     } catch (error) {
       summary.failed += 1;
+      console.error(`[Migration API] ❌ Error upserting record:`, error);
       output.push({ fingerprint: item.fingerprint, status: "failed", error: error instanceof Error ? error.message : String(error), transformed: item.transformed });
     }
   }
+
+  console.log(`[Migration API] Completed processing ${transformed.length} records. Summary:`, summary);
 
   res.json({ objectName, dryRun, summary, output });
 });
