@@ -207,6 +207,8 @@ router.post("/", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing lead id" });
     }
 
+    console.log(`[FieldChanges] RAW WEBHOOK PAYLOAD FOR LEAD ${leadId}:`, JSON.stringify(payload, null, 2));
+
     const currentValues: Record<string, string> = {};
     for (const field of TRACKED_FIELDS) {
       // First check native Twenty CRM "Record is updated" payload structure
