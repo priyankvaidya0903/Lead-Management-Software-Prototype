@@ -64,8 +64,16 @@ function setValue(output: Record<string, unknown>, key: string, value: unknown) 
 function applyStandardMapping(targetField: string, rawValue: unknown): unknown {
   if (targetField === "email") return normalizeEmail(rawValue);
   if (targetField === "phone") {
+    // If the raw value is already a formatted object, just pass it through
+    if (typeof rawValue === "object" && rawValue !== null) return rawValue;
+    
     const phone = normalizePhone(rawValue);
-    return phone ? { primaryPhoneNumber: phone } : undefined;
+    // Twenty CRM requires the calling code for valid phone numbers
+    return phone ? { 
+      primaryPhoneNumber: phone,
+      primaryPhoneCallingCode: "+91",
+      primaryPhoneCountryCode: "IN"
+    } : undefined;
   }
   if (["source", "treatment", "stage", "status"].includes(targetField)) return normalizeSelect(rawValue);
   if (typeof rawValue === "string") return rawValue.trim();
