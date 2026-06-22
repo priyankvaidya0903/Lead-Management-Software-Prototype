@@ -9,6 +9,7 @@ import twentyTasksRouter from "./routes/webhooks/twentyTasks.js";
 import metaLeadsRouter from "./routes/webhooks/metaLeads.js";
 import wpContactRouter from "./routes/webhooks/wpContact.js";
 import fieldChangesRouter from "./routes/webhooks/fieldChanges.js";
+import migrationRouter from "./routes/migration.js";
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -36,6 +37,7 @@ app.use("/crm-api/webhooks/twenty-tasks", twentyTasksRouter);
 app.use("/crm-api/webhooks/meta-leads", metaLeadsRouter);
 app.use("/crm-api/webhooks/wp-cf7", wpContactRouter);
 app.use("/crm-api/webhooks/field-changes", fieldChangesRouter);
+app.use("/crm-api/migration", migrationRouter);
 
 // Serve static files (booking panel)
 app.use("/public", express.static("public"));
