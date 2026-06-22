@@ -201,7 +201,7 @@ async function createChangeLogNote(leadId: string, changes: string[]): Promise<b
 router.post("/", async (req: Request, res: Response) => {
   try {
     const payload: any = req.body || {};
-    const leadId = (req.headers["id"] as string) || payload?.id;
+    const leadId = payload?.recordId || (req.headers["id"] as string) || payload?.id;
 
     if (!leadId) {
       return res.status(400).json({ error: "Missing lead id" });
@@ -209,9 +209,14 @@ router.post("/", async (req: Request, res: Response) => {
 
     const currentValues: Record<string, string> = {};
     for (const field of TRACKED_FIELDS) {
-      // Nginx drops headers with underscores by default! We must use dashes for headers.
-      const headerKey = field.replace(/_/g, "-"); 
-      const val = (req.headers[headerKey] as string) || payload?.[field] || "";
+      // First check native Twenty CRM "Record is updated" payload structure
+      let val = payload?.properties?.after?.[field];
+
+      // Fallback to headers (Nginx drops headers with underscores, so we use dashes)
+      if (!val) {
+        const headerKey = field.replace(/_/g, "-"); 
+        val = (req.headers[headerKey] as string) || payload?.[field] || "";
+      }
       if (val) currentValues[field] = val;
     }
 
