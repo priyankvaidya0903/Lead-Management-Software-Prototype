@@ -201,8 +201,8 @@ router.post("/", async (req: Request, res: Response) => {
 
     // OUTBOUND MESSAGES FROM TWENTY CRM
     const leadData = payload?.data ?? payload;
-    const status = headerStage || leadData?.status;
-    const leadId = leadData?.id || req.headers["id"];
+    const status = payload?.properties?.after?.status || headerStage || leadData?.status;
+    const leadId = payload?.recordId || leadData?.id || req.headers["id"];
 
     console.log(`[WhatsApp Webhook] Received webhook from Twenty CRM! Lead ID: ${leadId}, Status: ${status}`);
     console.log(`[WhatsApp Webhook] Full Payload:`, JSON.stringify(payload, null, 2));
@@ -210,7 +210,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     let phoneNumber = headerPhone || "";
     if (!phoneNumber) {
-      const phoneObj = leadData?.phone;
+      const phoneObj = payload?.properties?.after?.phone || leadData?.phone;
       if (typeof phoneObj === 'object' && phoneObj?.primaryPhoneNumber) {
         const callingCode = phoneObj.primaryPhoneCallingCode || "";
         const number = phoneObj.primaryPhoneNumber;
