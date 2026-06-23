@@ -38,8 +38,8 @@ export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFun
         
         console.log(`[RLS Proxy] Decoded JWT:`, decoded);
 
-        // Twenty usually stores user ID in `sub` or `id` or `userId`
-        const userId = decoded.sub || decoded.id || decoded.userId;
+        // Twenty usually stores the member ID we see in the UI as workspaceMemberId
+        const userId = decoded.workspaceMemberId || decoded.sub || decoded.id || decoded.userId;
 
         // If this user is restricted to a specific clinic
         if (userId && CLINIC_ACCESS_MAP[userId]) {
