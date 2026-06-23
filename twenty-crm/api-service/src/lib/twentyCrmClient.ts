@@ -152,23 +152,35 @@ export async function findLeadByPhone(phoneNumber: string): Promise<{ id: string
       return data?.data?.leadss ?? data?.leadss ?? data?.data ?? [];
     };
 
-    // 1. FAST PATH: Try exact match without + prefix (since user stores 91... in CRM directly)
+    // 1. FAST PATH: Try exact match
     let leads = await fetchLead(phoneNumber);
     if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
 
-    // 2. Try exact match with + prefix
-    leads = await fetchLead(`+${phoneNumber}`);
+    // Strip all non-digit characters for further processing
+    const cleanPhone = phoneNumber.replace(/\D/g, '');
+
+    // 2. Try the fully cleaned number
+    leads = await fetchLead(cleanPhone);
     if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
 
-    // 3. Try stripping India country code (91)
-    if (phoneNumber.startsWith('91')) {
-      leads = await fetchLead(phoneNumber.substring(2));
+    // 3. Try with '+' prefix
+    leads = await fetchLead(`+${cleanPhone}`);
+    if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
+
+    // 4. Try stripping India country code (91)
+    if (cleanPhone.startsWith('91')) {
+      const without91 = cleanPhone.substring(2);
+      leads = await fetchLead(without91);
+      if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
+      
+      // Also try with +91 space format that Twenty might use
+      leads = await fetchLead(`+91 ${without91.slice(0,5)} ${without91.slice(5)}`);
       if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
     }
 
-    // 4. Try stripping US country code (1)
-    if (phoneNumber.startsWith('1')) {
-      leads = await fetchLead(phoneNumber.substring(1));
+    // 5. Try stripping US country code (1)
+    if (cleanPhone.startsWith('1')) {
+      leads = await fetchLead(cleanPhone.substring(1));
       if (leads && leads.length > 0) return { id: leads[0].id, relationshipManagerId: leads[0].relationshipManagerId };
     }
 
