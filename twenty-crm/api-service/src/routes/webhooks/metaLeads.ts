@@ -19,7 +19,7 @@
  */
 import { Router, Request, Response } from "express";
 import crypto from "node:crypto";
-import { getManagersForClinic, getClinicsList } from "../../lib/twentyCrmClient.js";
+import { getManagersForClinic, getClinicsList, findLeadByPhone } from "../../lib/twentyCrmClient.js";
 import { getNextManagerIndex } from "../../lib/roundRobin.js";
 
 const router = Router();
@@ -168,31 +168,22 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   console.log(`[Meta Leads] Processing lead: ${name} | ${email} | ${phone} | source: ${source}`);
 
   // ── Duplicate check ──
-  if (email) {
+  if (phone) {
     try {
-      const filterParam = encodeURIComponent(`email.primaryEmail[eq]:${email}`);
-      const searchUrl = `${TWENTY_API_URL}/${LEADS_OBJECT}?filter=${filterParam}`;
-      const searchRes = await fetch(searchUrl, {
-        method: "GET",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${TWENTY_API_KEY}` },
-      });
+      const existingLead = await findLeadByPhone(phone);
 
-      if (searchRes.ok) {
-        const data = await searchRes.json();
-        const records = data?.data?.[LEADS_OBJECT] || data?.[LEADS_OBJECT] || data?.data || [];
-        if (Array.isArray(records) && records.length > 0) {
-          console.log(`[Meta Leads] Duplicate found — updating existing lead ${records[0].id}`);
-          await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}/${records[0].id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${TWENTY_API_KEY}` },
-            body: JSON.stringify({
-              status: "REPEAT_INQUIRY",
-              source,
-              ...(treatment && { treatment }),
-            }),
-          });
-          return { success: true, action: "updated", leadId: records[0].id };
-        }
+      if (existingLead) {
+        console.log(`[Meta Leads] Duplicate found by phone — updating existing lead ${existingLead.id}`);
+        await fetch(`${TWENTY_API_URL}/${LEADS_OBJECT}/${existingLead.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${TWENTY_API_KEY}` },
+          body: JSON.stringify({
+            status: "REPEAT_INQUIRY",
+            source1: [source],
+            ...(treatment && { treatment }),
+          }),
+        });
+        return { success: true, action: "updated", leadId: existingLead.id };
       }
     } catch (e) {
       console.error("[Meta Leads] Duplicate check failed:", e);

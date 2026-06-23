@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { getManagersForClinic, getClinicsList } from "../../lib/twentyCrmClient.js";
+import { getManagersForClinic, getClinicsList, findLeadByPhone } from "../../lib/twentyCrmClient.js";
 import { getNextManagerIndex } from "../../lib/roundRobin.js";
 
 const router = Router();
@@ -52,6 +52,27 @@ router.post("/", async (req: Request, res: Response) => {
     const formid = payload["_wpcf7"] || "";
 
     console.log(`[WP CF7] Processing lead: ${name} | ${email} | ${phone} | source: ${source} | formid: ${formid}`);
+
+    // ── Duplicate check ──
+    if (phone) {
+      try {
+        const existingLead = await findLeadByPhone(phone);
+        if (existingLead) {
+          console.log(`[WP CF7] Duplicate found by phone — updating existing lead ${existingLead.id}`);
+          await fetch(`${process.env.TWENTY_API_URL}/leadss/${existingLead.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.TWENTY_API_KEY}` },
+            body: JSON.stringify({
+              status: "REPEAT_INQUIRY",
+              source1: [source],
+            }),
+          });
+          return res.status(200).json({ success: true, action: "updated", leadId: existingLead.id });
+        }
+      } catch (e) {
+        console.error("[WP CF7] Duplicate check by phone failed:", e);
+      }
+    }
 
     // ── Round-robin manager assignment ──
     let clinicId = META_DEFAULT_CLINIC_ID;

@@ -7,7 +7,9 @@
     "Source": "source1",
     "Product": "oldCrmTreatment",
     "City": "city",
-    "Assigned User": "oldAssignedUser"
+    "Assigned User": "oldAssignedUser",
+    "clinicId": "clinicId",
+    "relationshipManagerId": "relationshipManagerId"
   },
   "valueMaps": {
     "status": {
@@ -20,8 +22,8 @@
       "follow up": "FOLLOWUP",
       "invalid": "NOT_INTERESTED",
       "budget client": "DROPOFF",
-      "lead transferred to ludhiana": "DROPOFF",
-      "call back": "FOLLOWUP",
+      "lead transferred to ludhiana": "LEAD_TRANSFERRED_FROM_LUDHIANA",
+      "call back": "CALLBACK",
       "distance lead": "DROPOFF",
       "parked": "FOLLOWUP",
       "switch off": "NOT_PICKING_UP"

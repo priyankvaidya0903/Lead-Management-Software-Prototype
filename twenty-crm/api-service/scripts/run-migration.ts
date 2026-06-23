@@ -50,7 +50,7 @@ async function run() {
     // --- STAGE MAPPING ---
     if (record.Status) {
       const statusKey = record.Status.trim().toLowerCase();
-      const stageMap = MIGRATION_CONFIG.valueMaps?.stage || {};
+      const stageMap = MIGRATION_CONFIG.valueMaps?.status || {};
       const mappedStage = stageMap[statusKey];
       
       if (mappedStage) {
@@ -98,7 +98,21 @@ async function run() {
       }
       // No extra formatting needed! Twenty CRM will accept the raw string into the oldCrmTreatment text field.
     }
-    
+
+    // --- CLINIC ASSIGNMENT ---
+    // Hardcode SDA Clinic ID for all migrated leads
+    record.clinicId = "f5a563b6-1ba4-42a3-9bf6-f9aa0e4d8699";
+
+    // --- MANAGER ASSIGNMENT ---
+    if (record["Assigned User"]) {
+      const managerName = record["Assigned User"].trim().toLowerCase();
+      if (managerName === "ashima") {
+        record.relationshipManagerId = "6dc0b775-7cdb-4a29-ae93-474d4f572dd8";
+      } else if (managerName === "suvigya") {
+        record.relationshipManagerId = "a9c04740-41d0-4362-a167-b428af4ca0a6";
+      }
+    }
+
     return record;
   });
 
@@ -132,6 +146,15 @@ async function run() {
 
       const data = await response.json();
       console.log(`Batch complete. Summary:`, data.summary);
+      
+      // Print the exact errors for any failed records
+      if (data.output) {
+        for (const res of data.output) {
+          if (res.status === "error" || res.status === "invalid") {
+            console.log(`❌ Failed to migrate ${res.fingerprint}:`, res.error || res.errors);
+          }
+        }
+      }
       
       // Accumulate totals
       for (const key in data.summary) {
