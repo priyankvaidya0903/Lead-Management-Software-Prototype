@@ -2,13 +2,15 @@ import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-// Mapping of Restricted User IDs to Allowed Clinic IDs (can be one or multiple)
 const CLINIC_ACCESS_MAP: Record<string, string[]> = {
-  // priyankvaidya09@gmail.com
-  "c1df67a2-d6df-4470-98be-8f49f7b630b3": [
+  // Ashima Katyal -> SDA Clinic
+  "019acef8-e918-47f0-ac0f-8b70fcf96faf": [
+    "f5a563b6-1ba4-42a3-9bf6-f9aa0e4d8699"
+  ],
+  // Shweta -> Khan Market Clinic
+  "aa591fbc-eccf-4102-b6d4-cc15f0a128a6": [
     "e2e061fb-9169-4c07-b911-32ac926ce25d"
-    // Add more clinic UUIDs here if they manage multiple!
-  ], 
+  ]
 };
 
 /**
