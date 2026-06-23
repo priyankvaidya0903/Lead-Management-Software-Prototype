@@ -1,4 +1,5 @@
 import { Router, Request, Response } from "express";
+import { createLeadNote } from "../lib/twentyCrmClient";
 
 type LegacyRecord = Record<string, unknown>;
 type JsonMap = Record<string, string>;
@@ -173,7 +174,11 @@ async function upsertRecord(
     throw new Error(`${method} ${url} failed: ${response.status} ${body}`);
   }
 
-  return { action: existingId ? "updated" : "created", existingId, body };
+  let parsedBody;
+  try { parsedBody = JSON.parse(body); } catch(e) {}
+  const returnedId = parsedBody?.data?.id || parsedBody?.data?.createLeadss?.[0]?.id || parsedBody?.data?.updateLeadss?.[0]?.id || parsedBody?.id || existingId;
+
+  return { action: existingId ? "updated" : "created", existingId, body, returnedId };
 }
 
 router.post("/preview", async (req: Request, res: Response) => {
@@ -246,11 +251,26 @@ router.post("/run", async (req: Request, res: Response) => {
 
     try {
       console.log(`[Migration API] Upserting record for ${item.fingerprint}...`);
-      const result = await upsertRecord(apiUrl, apiKey, objectName, item.transformed, uniqueBy);
+      
+      const recordToUpsert = { ...item.transformed } as any;
+      const lastComment = recordToUpsert.lastComment;
+      const lastCommentDate = recordToUpsert.lastCommentDate;
+      
+      delete recordToUpsert.lastComment;
+      delete recordToUpsert.lastCommentDate;
+      
+      const result = await upsertRecord(apiUrl, apiKey, objectName, recordToUpsert, uniqueBy);
       if (result.action === "created") summary.created += 1;
-      if (result.action === "updated") summary.updated += 1;
-      console.log(`[Migration API] ✅ Success: ${result.action} record (ID: ${result.existingId || 'N/A'})`);
-      output.push({ fingerprint: item.fingerprint, status: result.action, id: result.existingId, transformed: item.transformed });
+      else summary.updated += 1;
+      
+      if (lastComment && result.returnedId && objectName === "leadss") {
+        console.log(`[Migration API] Adding historical comment to timeline for lead ${result.returnedId}...`);
+        const noteText = lastCommentDate ? `**Historical Comment** (*${lastCommentDate}*):\n${lastComment}` : `**Historical Comment**:\n${lastComment}`;
+        await createLeadNote(result.returnedId, noteText);
+      }
+      
+      console.log(`[Migration API] ✅ Success: ${result.action} record (ID: ${result.returnedId || 'N/A'})`);
+      output.push({ fingerprint: item.fingerprint, status: result.action, id: result.returnedId, transformed: item.transformed });
     } catch (error) {
       summary.failed += 1;
       console.error(`[Migration API] ❌ Error upserting record:`, error);

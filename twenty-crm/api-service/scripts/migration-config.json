@@ -9,7 +9,11 @@
     "City": "city",
     "Assigned User": "oldAssignedUser",
     "clinicId": "clinicId",
-    "relationshipManagerId": "relationshipManagerId"
+    "relationshipManagerId": "relationshipManagerId",
+    "Added on": "createdAt",
+    "Updated on": "updatedAt",
+    "Last Comment": "lastComment",
+    "Last Comment Date": "lastCommentDate"
   },
   "valueMaps": {
     "status": {
