@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { createLeadNote } from "../lib/twentyCrmClient";
+import { createLeadNote } from "../lib/twentyCrmClient.js";
 
 type LegacyRecord = Record<string, unknown>;
 type JsonMap = Record<string, string>;
