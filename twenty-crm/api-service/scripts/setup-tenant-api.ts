@@ -71,7 +71,7 @@ async function getCustomObjects(workspaceId: string) {
     `SELECT id, "nameSingular", "namePlural", "labelSingular", "labelPlural",
             icon, description
      FROM core."objectMetadata"
-     WHERE "workspaceId" = $1 AND "isCustom" = true AND "isActive" = true
+     WHERE "workspaceId" = $1 AND "isSystem" = false AND "isActive" = true
      ORDER BY "createdAt"`,
     [workspaceId],
   );
@@ -85,7 +85,7 @@ async function getCustomFields(workspaceId: string, objectId: string) {
      FROM core."fieldMetadata"
      WHERE "workspaceId" = $1
        AND "objectMetadataId" = $2
-       AND "isCustom" = true
+       AND "isSystem" = false
        AND "isActive" = true
        AND type != 'RELATION'
      ORDER BY "createdAt"`,
@@ -112,12 +112,12 @@ async function getCustomRelationPairs(workspaceId: string, customObjectIds: stri
             f."relationTargetObjectMetadataId",
             f."relationTargetFieldMetadataId",
             o."nameSingular" AS "objectName",
-            o."isCustom"     AS "objectIsCustom"
+            o."isSystem"     AS "objectIsSystem"
      FROM core."fieldMetadata" f
      JOIN core."objectMetadata" o ON o.id = f."objectMetadataId"
      WHERE f."workspaceId" = $1
        AND f.type = 'RELATION'
-       AND f."isCustom" = true
+       AND f."isSystem" = false
        AND f."isActive" = true
      ORDER BY f."createdAt"`,
     [workspaceId],
