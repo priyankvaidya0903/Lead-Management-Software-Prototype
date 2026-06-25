@@ -21,6 +21,7 @@ app.use(cors({
   allowedHeaders: "*", // Allow all headers
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // CF7 webhooks often send form-encoded data
 
 import { graphqlRlsInterceptor, twentyProxy } from "./middleware/graphqlProxy.js";
 app.use("/graphql", graphqlRlsInterceptor, twentyProxy);
