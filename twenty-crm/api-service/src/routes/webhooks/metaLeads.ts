@@ -228,43 +228,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
     }
   }
 
-  // ── Create via Webhook (if configured) ──
-  if (TWENTY_WEBHOOK_URL) {
-    try {
-      const webhookPayload: Record<string, unknown> = {
-        name,
-        email,
-        phone,
-        source1: [source],
-        formid: leadData.formid || "",
-        ...(clinicId && { clinicId }),
-        ...(treatment && { treatment }),
-        ...(managerId && { managerId }),
-        ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
-        ...(leadData._ad_id && { adId: leadData._ad_id }),
-        ...(targetArea && { targetArea }),
-        ...(primaryGoal && { primaryGoal }),
-        ...(planningToStart && { planningToStart: [planningToStart] }),
-        ...(previousTreatment && { previousTreatment: [previousTreatment] }),
-        ...(budget && { budget }),
-      };
-
-      const response = await fetch(TWENTY_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(webhookPayload),
-      });
-
-      if (response.ok) {
-        console.log(`[Meta Leads] ✅ Lead "${name}" sent to Twenty CRM via workflow webhook.`);
-        return { success: true, action: "created_via_webhook" };
-      } else {
-        console.error(`[Meta Leads] Webhook failed (${response.status}):`, await response.text());
-      }
-    } catch (e) {
-      console.error("[Meta Leads] Webhook delivery failed:", e);
-    }
-  }
+  // ── Create via REST API directly ──
 
   // ── Fallback: Create via REST API directly ──
   try {
