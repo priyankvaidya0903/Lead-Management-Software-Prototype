@@ -27,13 +27,11 @@ router.post("/", async (req: Request, res: Response) => {
     const email = payload["your-email"] || payload["email"] || "";
     const rawPhone = payload["your-tel"] || payload["full_number"] || payload["phone-number"] || "";
     
-    // Clean and format phone number for Twenty CRM (requires E.164 format)
-    let phone = rawPhone.replace(/[^0-9+]/g, '');
-    if (phone.length === 10 && !phone.startsWith('+')) {
-      phone = `+91${phone}`; // Default to India country code for 10-digit numbers
-    } else if (phone.length > 0 && !phone.startsWith('+')) {
-      phone = `+${phone}`;
+    let phoneStr = rawPhone.replace(/[^0-9+]/g, '');
+    if (phoneStr.length === 10 && !phoneStr.startsWith('+')) {
+      phoneStr = `91${phoneStr}`;
     }
+    const phone = phoneStr.replace("+", ""); // Strip plus for primaryPhoneNumber
     
     // CF7 sometimes sends checkboxes/radios as arrays
     const rawLocation = payload["location"] || payload["preferred-location"];
@@ -116,8 +114,14 @@ router.post("/", async (req: Request, res: Response) => {
     // ── Create via REST API directly ──
     const leadPayload: Record<string, any> = {
       name,
-      email: { primaryEmail: email },
-      phone: { primaryPhoneNumber: phone },
+      ...(email && { email: { primaryEmail: email } }),
+      ...(phone && { 
+        phone: { 
+          primaryPhoneNumber: phone,
+          primaryPhoneCallingCode: "+91",
+          primaryPhoneCountryCode: "IN"
+        } 
+      }),
       status: "REQUIREMENTS_GATHERED",
       source1: [source],
       formid: formid,
