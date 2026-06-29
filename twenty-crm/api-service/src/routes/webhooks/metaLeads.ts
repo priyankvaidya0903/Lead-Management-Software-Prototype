@@ -140,7 +140,7 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   // Helper to fuzzy match Facebook form questions (since different forms have different keys)
   const extractField = (keywords: string[]) => {
-    const matchedKey = Object.keys(leadData).find(key => 
+    const matchedKey = Object.keys(leadData).find(key =>
       keywords.some(kw => key.includes(kw))
     );
     return matchedKey ? leadData[matchedKey] : "";
@@ -148,19 +148,20 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   // Custom EmSculpt Form Fields (Fuzzy matched for all forms)
   const targetArea = formatCrmOption(extractField([
-    "area_would_you_like", 
-    "area_are_you_looking", 
-    "concern_would_you_like", 
+    "area_would_you_like",
+    "area_are_you_looking",
+    "concern_would_you_like",
     "looking_to_treat"
   ]));
   const primaryGoal = formatCrmOption(extractField(["primary_goal"]));
-  const planningToStart = formatCrmOption(extractField(["planning_to_start"]));
+  const planningToStart = formatCrmOption(extractField(["planning_to_start", "when_are_you_looking_to_start"]));
   const previousTreatment = formatCrmOption(extractField(["treatments_before"]));
   const preferredLocation = extractField(["preferred_location", "preferred_clinic_location", "clinic_location"]);
   const budget = extractField(["preferred_transformation_budget", "budget"]); // Left raw for Text fields
 
   // Determine treatment if present in form
-  let treatment = leadData.treatment || leadData.service || leadData.interest || "";
+  const extractedTreatment = extractField(["treatment", "service", "interest"]);
+  let treatment = leadData.treatment || leadData.service || leadData.interest || extractedTreatment || "";
   if (treatment) {
     treatment = treatment.toUpperCase().replace(/\s+/g, "_").replace(/-/g, "_");
   }
@@ -195,13 +196,24 @@ async function createLeadInCRM(leadData: Record<string, string>) {
 
   if (preferredLocation) {
     try {
-      const normalize = (str: string) => str.toLowerCase().replace(/[\s_-]/g, '');
-      const locStr = normalize(preferredLocation);
+      const normalizeSpaces = (str: string) => str.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+      const locStr = normalizeSpaces(preferredLocation);
+      const locWords = locStr.split(' ').filter(w => w !== 'clinic' && w !== 'location');
+      
       const clinics = await getClinicsList();
-      const matchedClinic = clinics.find(c => {
-        const cName = normalize(c.name);
-        return cName.includes(locStr) || locStr.includes(cName);
+      let matchedClinic = clinics.find(c => {
+        const cName = normalizeSpaces(c.name);
+        return locWords.length > 0 && locWords.every(w => cName.includes(w));
       });
+      
+      if (!matchedClinic) {
+        matchedClinic = clinics.find(c => {
+          const cNameNormalized = c.name.toLowerCase().replace(/[\s_-]/g, '');
+          const locNormalized = preferredLocation.toLowerCase().replace(/[\s_-]/g, '');
+          return cNameNormalized.includes(locNormalized) || locNormalized.includes(cNameNormalized);
+        });
+      }
+      
       if (matchedClinic) {
         clinicId = matchedClinic.id;
         console.log(`[Meta Leads] Dynamically matched clinic: ${matchedClinic.name} (${clinicId})`);
@@ -228,7 +240,43 @@ async function createLeadInCRM(leadData: Record<string, string>) {
     }
   }
 
-  // ── Create via REST API directly ──
+  // ── Create via Webhook (if configured) ──
+  if (TWENTY_WEBHOOK_URL) {
+    try {
+      const webhookPayload: Record<string, unknown> = {
+        name,
+        email,
+        phone,
+        source1: [source],
+        formid: leadData.formid || "",
+        ...(clinicId && { clinicId }),
+        ...(treatment && { treatment }),
+        ...(managerId && { managerId }),
+        ...(leadData._campaign_id && { campaignId: leadData._campaign_id }),
+        ...(leadData._ad_id && { adId: leadData._ad_id }),
+        ...(targetArea && { targetArea }),
+        ...(primaryGoal && { primaryGoal }),
+        ...(planningToStart && { planningToStart: [planningToStart] }),
+        ...(previousTreatment && { previousTreatment: [previousTreatment] }),
+        ...(budget && { budget }),
+      };
+
+      const response = await fetch(TWENTY_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(webhookPayload),
+      });
+
+      if (response.ok) {
+        console.log(`[Meta Leads] ✅ Lead "${name}" sent to Twenty CRM via workflow webhook.`);
+        return { success: true, action: "created_via_webhook" };
+      } else {
+        console.error(`[Meta Leads] Webhook failed (${response.status}):`, await response.text());
+      }
+    } catch (e) {
+      console.error("[Meta Leads] Webhook delivery failed:", e);
+    }
+  }
 
   // ── Fallback: Create via REST API directly ──
   try {
