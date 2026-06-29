@@ -153,15 +153,14 @@ async function createLeadInCRM(leadData: Record<string, string>) {
     "concern_would_you_like",
     "looking_to_treat"
   ]));
-  const primaryGoal = formatCrmOption(extractField(["primary_goal"]));
+  const primaryGoal = formatCrmOption(extractField(["primary_goal", "treatment", "service", "interest"]));
   const planningToStart = formatCrmOption(extractField(["planning_to_start", "when_are_you_looking_to_start"]));
   const previousTreatment = formatCrmOption(extractField(["treatments_before"]));
   const preferredLocation = extractField(["preferred_location", "preferred_clinic_location", "clinic_location"]);
   const budget = extractField(["preferred_transformation_budget", "budget"]); // Left raw for Text fields
 
-  // Determine treatment if present in form
-  const extractedTreatment = extractField(["treatment", "service", "interest"]);
-  let treatment = leadData.treatment || leadData.service || leadData.interest || extractedTreatment || "";
+  // Keep explicit treatment matches for older forms, but rely on primaryGoal for newer ones
+  let treatment = leadData.treatment || leadData.service || leadData.interest || "";
   if (treatment) {
     treatment = treatment.toUpperCase().replace(/\s+/g, "_").replace(/-/g, "_");
   }
