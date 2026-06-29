@@ -154,10 +154,10 @@ async function createLeadInCRM(leadData: Record<string, string>) {
     "looking_to_treat"
   ]));
   const primaryGoal = formatCrmOption(extractField(["primary_goal", "treatment", "service", "interest"]));
-  const planningToStart = formatCrmOption(extractField(["planning_to_start", "when_are_you_looking_to_start"]));
+  const planningToStart = formatCrmOption(extractField(["planning_to_start"]));
   const previousTreatment = formatCrmOption(extractField(["treatments_before"]));
   const preferredLocation = extractField(["preferred_location", "preferred_clinic_location", "clinic_location"]);
-  const budget = extractField(["preferred_transformation_budget", "budget"]); // Left raw for Text fields
+  const budget = extractField(["preferred_transformation_budget", "budget", "when_are_you_looking_to_start"]); // Left raw for Text fields
 
   // Keep explicit treatment matches for older forms, but rely on primaryGoal for newer ones
   let treatment = leadData.treatment || leadData.service || leadData.interest || "";
@@ -196,7 +196,19 @@ async function createLeadInCRM(leadData: Record<string, string>) {
   if (preferredLocation) {
     try {
       const normalizeSpaces = (str: string) => str.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
-      const locStr = normalizeSpaces(preferredLocation);
+      let locStr = normalizeSpaces(preferredLocation);
+      
+      // Handle known city name variations
+      const locationAliases: Record<string, string> = {
+        'gurgaon': 'gurugram',
+      };
+      
+      for (const [alias, canonical] of Object.entries(locationAliases)) {
+        if (locStr.includes(alias)) {
+          locStr = locStr.replace(alias, canonical);
+        }
+      }
+
       const locWords = locStr.split(' ').filter(w => w !== 'clinic' && w !== 'location');
       
       const clinics = await getClinicsList();
