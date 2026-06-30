@@ -201,6 +201,8 @@ async function createLeadInCRM(leadData: Record<string, string>) {
       // Handle known city name variations
       const locationAliases: Record<string, string> = {
         'gurgaon': 'gurugram',
+        'sda_delhi': 'sda',
+        'sda delhi': 'sda',
       };
       
       for (const [alias, canonical] of Object.entries(locationAliases)) {
