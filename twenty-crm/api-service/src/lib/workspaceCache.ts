@@ -28,33 +28,16 @@ async function refreshCache() {
     return;
   }
 
-  // Convert REST URL to GraphQL URL
-  const graphqlUrl = apiUrl.replace("/rest", "/graphql");
-  
-  const query = `
-    query {
-      workspaceMembers(first: 200) {
-        edges {
-          node {
-            id
-            name { firstName lastName }
-            clinic {
-              id
-            }
-          }
-        }
-      }
-    }
-  `;
+  // Use REST API with depth=1 so that the `clinic` relationship array is populated
+  const url = `${apiUrl}/workspaceMembers?depth=1&limit=200`;
 
   try {
-    const res = await fetch(graphqlUrl, {
-      method: "POST",
+    const res = await fetch(url, {
+      method: "GET",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ query })
+      }
     });
     
     if (!res.ok) {
@@ -63,19 +46,19 @@ async function refreshCache() {
     }
     
     const data = await res.json();
-    const members = data?.data?.workspaceMembers?.edges || [];
+    const members = data?.data?.workspaceMembers || data?.workspaceMembers || data?.data || [];
     
     const newCache: Record<string, string | null> = {};
-    for (const edge of members) {
-      const node = edge.node;
-      if (node) {
-        newCache[node.id] = node.clinic?.id || null;
-      }
+    for (const member of members) {
+      // The `clinic` relationship returns an array of objects in REST API
+      const clinics = member.clinic || [];
+      const firstClinicId = clinics.length > 0 ? clinics[0].id : null;
+      newCache[member.id] = firstClinicId;
     }
     
     cache = newCache;
     lastFetchTime = Date.now();
-    console.log(`[WorkspaceCache] Refreshed dynamically! Mapped ${Object.keys(cache).length} workspace members.`);
+    console.log(`[WorkspaceCache] Refreshed dynamically via REST! Mapped ${Object.keys(cache).length} workspace members.`);
   } catch (err) {
     console.error("[WorkspaceCache] Error refreshing cache:", err);
   }
