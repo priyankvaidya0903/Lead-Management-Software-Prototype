@@ -34,9 +34,9 @@ export const graphqlRlsInterceptor = async (req: Request, res: Response, next: N
 
         // If this user is restricted to a specific clinic
         if (userId) {
-          const assignedClinicId = await getWorkspaceMemberClinic(userId);
-          if (assignedClinicId) {
-            console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinic: ${assignedClinicId}`);
+          const assignedClinicIds = await getWorkspaceMemberClinic(userId);
+          if (assignedClinicIds && assignedClinicIds.length > 0) {
+            console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinics: ${assignedClinicIds.join(', ')}`);
 
             // Ensure variables object exists
             req.body.variables = req.body.variables || {};
@@ -46,7 +46,7 @@ export const graphqlRlsInterceptor = async (req: Request, res: Response, next: N
             // Twenty GraphQL syntax uses { clinicId: { in: ["..."] } } for multiple matching
             req.body.variables.filter = {
               ...req.body.variables.filter,
-              clinicId: { in: [assignedClinicId] }
+              clinicId: { in: assignedClinicIds }
             };
           } else {
              console.log(`[RLS Proxy] User ${userId} has no clinic assigned. Granting full access.`);

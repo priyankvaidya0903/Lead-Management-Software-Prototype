@@ -1,7 +1,7 @@
 import "dotenv/config";
 
-// In-memory cache: workspaceMemberId -> clinicId
-let cache: Record<string, string | null> = {};
+// In-memory cache: workspaceMemberId -> array of clinicIds
+let cache: Record<string, string[] | null> = {};
 let lastFetchTime = 0;
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
@@ -9,7 +9,7 @@ const CACHE_TTL_MS = 60_000; // 60 seconds
  * Gets the clinicId assigned to a workspace member.
  * Automatically refreshes the cache from Twenty CRM if it is older than 60 seconds.
  */
-export async function getWorkspaceMemberClinic(userId: string): Promise<string | null> {
+export async function getWorkspaceMemberClinic(userId: string): Promise<string[] | null> {
   if (Date.now() - lastFetchTime > CACHE_TTL_MS) {
     await refreshCache();
   }
@@ -48,12 +48,12 @@ async function refreshCache() {
     const data = await res.json();
     const members = data?.data?.workspaceMembers || data?.workspaceMembers || data?.data || [];
     
-    const newCache: Record<string, string | null> = {};
+    const newCache: Record<string, string[] | null> = {};
     for (const member of members) {
       // The `clinic` relationship returns an array of objects in REST API
       const clinics = member.clinic || [];
-      const firstClinicId = clinics.length > 0 ? clinics[0].id : null;
-      newCache[member.id] = firstClinicId;
+      const clinicIds = clinics.map((c: any) => c.id);
+      newCache[member.id] = clinicIds.length > 0 ? clinicIds : null;
     }
     
     cache = newCache;
