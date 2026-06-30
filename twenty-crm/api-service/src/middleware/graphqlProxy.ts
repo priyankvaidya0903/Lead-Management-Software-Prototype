@@ -2,22 +2,13 @@ import { createProxyMiddleware, fixRequestBody } from "http-proxy-middleware";
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-const CLINIC_ACCESS_MAP: Record<string, string[]> = {
-  // Ashima Katyal -> SDA Clinic
-  "019acef8-e918-47f0-ac0f-8b70fcf96faf": [
-    "f5a563b6-1ba4-42a3-9bf6-f9aa0e4d8699"
-  ],
-  // Shweta -> Khan Market Clinic
-  "aa591fbc-eccf-4102-b6d4-cc15f0a128a6": [
-    "e2e061fb-9169-4c07-b911-32ac926ce25d"
-  ]
-};
+import { getWorkspaceMemberClinic } from "../lib/workspaceCache.js";
 
 /**
  * Middleware to intercept GraphQL requests BEFORE they reach the proxy.
  * Injects a Row-Level Security filter for specific users.
  */
-export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFunction) => {
+export const graphqlRlsInterceptor = async (req: Request, res: Response, next: NextFunction) => {
   // Only process POST requests with a JSON body
   if (req.method !== "POST" || !req.body) {
     return next();
@@ -42,20 +33,24 @@ export const graphqlRlsInterceptor = (req: Request, res: Response, next: NextFun
         const userId = decoded.workspaceMemberId || decoded.sub || decoded.id || decoded.userId;
 
         // If this user is restricted to a specific clinic
-        if (userId && CLINIC_ACCESS_MAP[userId]) {
-          const allowedClinicIds = CLINIC_ACCESS_MAP[userId];
-          console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinics: ${allowedClinicIds.join(", ")}`);
+        if (userId) {
+          const assignedClinicId = await getWorkspaceMemberClinic(userId);
+          if (assignedClinicId) {
+            console.log(`[RLS Proxy] Enforcing clinic filter for user ${userId} -> Clinic: ${assignedClinicId}`);
 
-          // Ensure variables object exists
-          req.body.variables = req.body.variables || {};
-          req.body.variables.filter = req.body.variables.filter || {};
+            // Ensure variables object exists
+            req.body.variables = req.body.variables || {};
+            req.body.variables.filter = req.body.variables.filter || {};
 
-          // Inject the clinic filter! 
-          // Twenty GraphQL syntax uses { clinicId: { in: ["..."] } } for multiple matching
-          req.body.variables.filter = {
-            ...req.body.variables.filter,
-            clinicId: { in: allowedClinicIds }
-          };
+            // Inject the clinic filter! 
+            // Twenty GraphQL syntax uses { clinicId: { in: ["..."] } } for multiple matching
+            req.body.variables.filter = {
+              ...req.body.variables.filter,
+              clinicId: { in: [assignedClinicId] }
+            };
+          } else {
+             console.log(`[RLS Proxy] User ${userId} has no clinic assigned. Granting full access.`);
+          }
         }
       } catch (err) {
         console.error("[RLS Proxy] Error decoding JWT:", err);
